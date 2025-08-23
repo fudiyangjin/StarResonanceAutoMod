@@ -91,11 +91,19 @@ class ModulePart:
     value: int
 
 
-@dataclass
+@dataclass(eq=True)
 class ModuleInfo:
     """模组信息"""
     name: str
     config_id: int
     uuid: str
     quality: int
-    parts: List[ModulePart] 
+    parts: List[ModulePart]
+    
+    def __hash__(self):
+        return hash(self.uuid)
+    
+    def __lt__(self, other):
+        if not isinstance(other, ModuleInfo):
+            return NotImplemented
+        return self.uuid < other.uuid 

@@ -161,7 +161,7 @@ class ModuleParser:
             target_category = category_map.get(category, ModuleCategory.ALL)
             
             optimizer = ModuleOptimizer()
-            optimizer.optimize_and_display(modules, target_category, top_n=20)
+            optimizer.optimize_and_display(modules, target_category, top_n=40)
             
             # 模组筛选完成后自动退出程序
             self.logger.info("=== 模组筛选完成，准备退出程序 ===")
