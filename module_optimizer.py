@@ -183,12 +183,15 @@ class ModuleOptimizer:
         self.logger.info(f"开始计算{category.value}类型模组的最优搭配")
         
         # 过滤指定类型的模组
-        filtered_modules = [
-            module for module in modules 
-            if self.get_module_category(module) == category
-        ]
-        
-        self.logger.info(f"找到{len(filtered_modules)}个{category.value}类型模组")
+        if category == ModuleCategory.ALL:
+            filtered_modules = modules
+            self.logger.info(f"使用全部模组，共{len(filtered_modules)}个")
+        else:
+            filtered_modules = [
+                module for module in modules 
+                if self.get_module_category(module) == category
+            ]
+            self.logger.info(f"找到{len(filtered_modules)}个{category.value}类型模组")
         
         if len(filtered_modules) < 4:
             self.logger.warning(f"{category.value}类型模组数量不足4个, 无法形成完整搭配")
@@ -256,13 +259,13 @@ class ModuleOptimizer:
     
     def optimize_and_display(self, 
                            modules: List[ModuleInfo], 
-                           category: ModuleCategory = ModuleCategory.ATTACK,
+                           category: ModuleCategory = ModuleCategory.ALL,
                            top_n: int = 20):
         """优化并显示结果
         
         Args:
             modules: 所有模组列表
-            category: 目标模组类型（攻击/守护/辅助），默认攻击
+            category: 目标模组类型（攻击/守护/辅助/全部），默认全部
             top_n: 显示前N个最优组合, 默认20
         """
         print(f"\n{'='*50}")

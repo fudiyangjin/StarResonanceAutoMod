@@ -23,14 +23,17 @@ class ModuleParser:
     def __init__(self):
         self.logger = logger
     
-    def parse_module_info(self, v_data: CharSerialize, category: str = "攻击", attributes: List[str] = None):
+    def parse_module_info(self, v_data: CharSerialize, category: str = "全部", attributes: List[str] = None, 
+                         exclude_attributes: List[str] = None, match_count: int = 1):
         """
         解析模组信息
 
         Args:
             v_data: VData数据
-            category: 模组类型（攻击/守护/辅助）
+            category: 模组类型（攻击/守护/辅助/全部）
             attributes: 要筛选的属性词条列表
+            exclude_attributes: 要排除的属性词条列表
+            match_count: 模组需要包含的指定词条数量
         """
         self.logger.info("开始解析模组")
         
@@ -82,8 +85,10 @@ class ModuleParser:
                 self.logger.debug(f"  {i}. {module.name} ({parts_str})")
             
             # 属性筛选
-            if attributes:
-                filtered_modules = self._filter_modules_by_attributes(modules, attributes)
+            if attributes or exclude_attributes:
+                filtered_modules = self._filter_modules_by_attributes(
+                    modules, attributes, exclude_attributes, match_count
+                )
                 self.logger.info(f"属性筛选后剩余 {len(filtered_modules)} 个模组")
             else:
                 filtered_modules = modules
@@ -93,35 +98,45 @@ class ModuleParser:
         
         return modules
     
-    def _filter_modules_by_attributes(self, modules: List[ModuleInfo], attributes: List[str]) -> List[ModuleInfo]:
+    def _filter_modules_by_attributes(self, modules: List[ModuleInfo], attributes: List[str] = None, 
+                                     exclude_attributes: List[str] = None, match_count: int = 1) -> List[ModuleInfo]:
         """根据属性词条筛选模组
         
         Args:
             modules: 模组列表
             attributes: 要筛选的属性词条列表
+            exclude_attributes: 要排除的属性词条列表
+            match_count: 模组需要包含的指定词条数量
             
         Returns:
             筛选后的模组列表
         """
-        # 如果没有指定属性筛选条件，返回所有模组
-        if not attributes:
-            return modules
-            
         filtered_modules = []
         
         for module in modules:
             # 获取模组的所有属性名称
             module_attrs = [part.name for part in module.parts]
             
-            # 检查模组的所有词条是否都在指定的属性列表中
-            all_module_attrs_in_list = all(attr in attributes for attr in module_attrs)
+            # 检查是否包含排除的属性
+            if exclude_attributes:
+                has_excluded_attr = any(attr in exclude_attributes for attr in module_attrs)
+                if has_excluded_attr:
+                    excluded_attrs = [attr for attr in module_attrs if attr in exclude_attributes]
+                    self.logger.debug(f"模组 '{module.name}' 包含排除属性: {', '.join(excluded_attrs)} (模组词条: {', '.join(module_attrs)})")
+                    continue
             
-            if all_module_attrs_in_list:
-                filtered_modules.append(module)
-                self.logger.debug(f"模组 '{module.name}' 的所有词条都在指定属性列表中: {', '.join(module_attrs)}")
+            # 检查包含的属性数量
+            if attributes:
+                matching_attrs = [attr for attr in module_attrs if attr in attributes]
+                if len(matching_attrs) < match_count:
+                    self.logger.debug(f"模组 '{module.name}' 包含的指定属性数量不足: {len(matching_attrs)} < {match_count} (模组词条: {', '.join(module_attrs)})")
+                    continue
+                
+                self.logger.debug(f"模组 '{module.name}' 通过筛选: 包含{len(matching_attrs)}个指定属性 ({', '.join(matching_attrs)}) (模组词条: {', '.join(module_attrs)})")
             else:
-                invalid_attrs = [attr for attr in module_attrs if attr not in attributes]
-                self.logger.debug(f"模组 '{module.name}' 包含不在指定列表中的属性: {', '.join(invalid_attrs)}")
+                self.logger.debug(f"模组 '{module.name}' 通过筛选: 无属性筛选条件")
+            
+            filtered_modules.append(module)
         
         return filtered_modules
     
@@ -139,10 +154,11 @@ class ModuleParser:
             category_map = {
                 "攻击": ModuleCategory.ATTACK,
                 "守护": ModuleCategory.GUARDIAN,
-                "辅助": ModuleCategory.SUPPORT
+                "辅助": ModuleCategory.SUPPORT,
+                "全部": ModuleCategory.ALL
             }
             
-            target_category = category_map.get(category, ModuleCategory.ATTACK)
+            target_category = category_map.get(category, ModuleCategory.ALL)
             
             optimizer = ModuleOptimizer()
             optimizer.optimize_and_display(modules, target_category, top_n=20)

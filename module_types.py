@@ -39,6 +39,7 @@ class ModuleCategory(Enum):
     ATTACK = "攻击"
     GUARDIAN = "守护" 
     SUPPORT = "辅助"
+    ALL = "全部"
 
 
 # 模组名称映射

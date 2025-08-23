@@ -22,18 +22,23 @@ logger = get_logger(__name__)
 class StarResonanceMonitor:
     """星痕共鸣监控器"""
     
-    def __init__(self, interface_index: int = None, category: str = "攻击", attributes: List[str] = None):
+    def __init__(self, interface_index: int = None, category: str = "全部", attributes: List[str] = None, 
+                 exclude_attributes: List[str] = None, match_count: int = 1):
         """
         初始化监控器
         
         Args:
             interface_index: 网络接口索引
-            category: 模组类型（攻击/守护/辅助）
+            category: 模组类型（攻击/守护/辅助/全部）
             attributes: 要筛选的属性词条列表
+            exclude_attributes: 要排除的属性词条列表
+            match_count: 模组需要包含的指定词条数量
         """
         self.interface_index = interface_index
         self.category = category
         self.attributes = attributes or []
+        self.exclude_attributes = exclude_attributes or []
+        self.match_count = match_count
         self.is_running = False
         
         # 获取网络接口信息
@@ -69,9 +74,11 @@ class StarResonanceMonitor:
         logger.info("=== 星痕共鸣监控器启动 ===")
         logger.info(f"模组类型: {self.category}")
         if self.attributes:
-            logger.info(f"属性筛选: {', '.join(self.attributes)}")
+            logger.info(f"属性筛选: {', '.join(self.attributes)} (需要包含{self.match_count}个)")
         else:
             logger.info("属性筛选: 无 (使用所有模组)")
+        if self.exclude_attributes:
+            logger.info(f"排除属性: {', '.join(self.exclude_attributes)}")
         if self.selected_interface:
             logger.info(f"网络接口: {self.interface_index} - {self.selected_interface['description']}")
             logger.info(f"接口名称: {self.selected_interface['name']}")
@@ -101,7 +108,13 @@ class StarResonanceMonitor:
             # 解析模组信息
             v_data = data.get('v_data')
             if v_data:
-                self.module_parser.parse_module_info(v_data, category=self.category, attributes=self.attributes)
+                self.module_parser.parse_module_info(
+                    v_data=v_data, 
+                    category=self.category, 
+                    attributes=self.attributes, 
+                    exclude_attributes=self.exclude_attributes,
+                    match_count=self.match_count
+                )
                     
         except Exception as e:
             logger.error(f"处理SyncContainerData数据包失败: {e}")
@@ -116,10 +129,14 @@ def main():
     parser.add_argument('--debug', '-d', action='store_true', help='启用调试模式')
     parser.add_argument('--auto', '-a', action='store_true', help='自动检测默认网络接口')
     parser.add_argument('--list', '-l', action='store_true', help='列出所有网络接口')
-    parser.add_argument('--category', '-c', type=str, choices=['攻击', '守护', '辅助'], 
-                       default='攻击', help='模组类型 (默认: 攻击)')
+    parser.add_argument('--category', '-c', type=str, choices=['攻击', '守护', '辅助', '全部'], 
+                       default='全部', help='模组类型 (默认: 全部)')
     parser.add_argument('--attributes', '-attr', type=str, nargs='+', 
                        help='指定要筛选的属性词条 (例如: 力量加持 敏捷加持 智力加持 特攻伤害 精英打击 特攻治疗加持 专精治疗加持 施法专注 攻速专注 暴击专注 幸运专注 抵御魔法 抵御物理)')
+    parser.add_argument('--exclude-attributes', '-exattr', type=str, nargs='+',
+                       help='指定要排除的属性词条 (例如: 特攻治疗加持 专精治疗加持)')
+    parser.add_argument('--match-count', '-mc', type=int, default=1,
+                       help='模组需要包含的指定词条数量 (默认: 1)')
 
     
     args = parser.parse_args()
@@ -183,7 +200,9 @@ def main():
     monitor = StarResonanceMonitor(
         interface_index=interface_index,
         category=args.category,
-        attributes=args.attributes
+        attributes=args.attributes,
+        exclude_attributes=args.exclude_attributes,
+        match_count=args.match_count
     )
     
     try:
