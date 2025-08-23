@@ -3,6 +3,7 @@
 """
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass
 from itertools import combinations
@@ -39,6 +40,39 @@ class ModuleOptimizer:
     
     def __init__(self):
         self.logger = logger
+        self._result_log_file = None
+    
+    def _get_current_log_file(self) -> Optional[str]:
+        """获取当前日志文件路径
+        
+        Returns:
+            当前日志文件路径, 如果无法获取则返回None
+        """
+        try:
+            root_logger = logging.getLogger()
+            for handler in root_logger.handlers:
+                if isinstance(handler, logging.FileHandler):
+                    return handler.baseFilename
+            return None
+        except Exception as e:
+            self.logger.warning(f"无法获取日志文件路径: {e}")
+            return None
+    
+    def _log_result(self, message: str):
+        """记录筛选结果到日志文件, 不带前缀
+        
+        Args:
+            message: 要记录的消息
+        """
+        try:
+            if self._result_log_file is None:
+                self._result_log_file = self._get_current_log_file()
+            
+            if self._result_log_file and os.path.exists(self._result_log_file):
+                with open(self._result_log_file, 'a', encoding='utf-8') as f:
+                    f.write(message + '\n')
+        except Exception as e:
+            self.logger.warning(f"记录筛选结果失败: {e}")
     
     def get_module_category(self, module: ModuleInfo) -> ModuleCategory:
         """获取模组类型分类
@@ -244,18 +278,29 @@ class ModuleOptimizer:
             rank: 排名（第几名）
         """
         print(f"\n=== 第{rank}名搭配 ===")
+        self._log_result(f"\n=== 第{rank}名搭配 ===")
+        
         print(f"总属性值: {combination.total_attr_value}")
+        self._log_result(f"总属性值: {combination.total_attr_value}")
+        
         print(f"达到属性等级等级: {combination.threshold_level} ({ATTR_THRESHOLDS[combination.threshold_level]}点)")
+        self._log_result(f"达到属性等级等级: {combination.threshold_level} ({ATTR_THRESHOLDS[combination.threshold_level]}点)")
+        
         print(f"综合评分: {combination.score:.1f}")
+        self._log_result(f"综合评分: {combination.score:.1f}")
         
         print("\n模组列表:")
+        self._log_result("\n模组列表:")
         for i, module in enumerate(combination.modules, 1):
             parts_str = ", ".join([f"{p.name}+{p.value}" for p in module.parts])
             print(f"  {i}. {module.name} (品质{module.quality}) - {parts_str}")
+            self._log_result(f"  {i}. {module.name} (品质{module.quality}) - {parts_str}")
         
         print("\n属性分布:")
+        self._log_result("\n属性分布:")
         for attr_name, value in sorted(combination.attr_breakdown.items()):
             print(f"  {attr_name}: +{value}")
+            self._log_result(f"  {attr_name}: +{value}")
     
     def optimize_and_display(self, 
                            modules: List[ModuleInfo], 
@@ -269,25 +314,46 @@ class ModuleOptimizer:
             top_n: 显示前N个最优组合, 默认20
         """
         print(f"\n{'='*50}")
+        self._log_result(f"\n{'='*50}")
+        
         print(f"模组搭配优化 - {category.value}类型")
+        self._log_result(f"模组搭配优化 - {category.value}类型")
+        
         print(f"{'='*50}")
+        self._log_result(f"{'='*50}")
         
         optimal_combinations = self.find_optimal_combinations_greedy(modules, category, top_n)
         
         if not optimal_combinations:
             print(f"未找到{category.value}类型的有效搭配")
+            self._log_result(f"未找到{category.value}类型的有效搭配")
             return
         
         print(f"\n找到{len(optimal_combinations)}个最优搭配:")
+        self._log_result(f"\n找到{len(optimal_combinations)}个最优搭配:")
         
         for i, combination in enumerate(optimal_combinations, 1):
             self.print_combination_details(combination, i)
         
         # 显示统计信息
         print(f"\n{'='*50}")
+        self._log_result(f"\n{'='*50}")
+        
         print("统计信息:")
+        self._log_result("统计信息:")
+        
         print(f"总模组数量: {len(modules)}")
+        self._log_result(f"总模组数量: {len(modules)}")
+        
         print(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
+        self._log_result(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
+        
         print(f"最高属性总值: {optimal_combinations[0].total_attr_value}")
+        self._log_result(f"最高属性总值: {optimal_combinations[0].total_attr_value}")
+        
         print(f"最高属性: {optimal_combinations[0].threshold_level}")
+        self._log_result(f"最高属性: {optimal_combinations[0].threshold_level}")
+        
         print(f"{'='*50}")
+        self._log_result(f"{'='*50}")
+
