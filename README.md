@@ -8,10 +8,11 @@
 
 ### 基本用法
 
-1. 命令行运行 `StarResonanceAutoMod.exe` + 对应参数
-2. 选择网络接口(先带 `-a` 参数尝试自动选择)
-3. 重新登录游戏, 选择角色
-4. 等待程序自动解析模组并显示最优搭配
+1. 若从来使用过市面上通过抓包展示 dps 的工具请到原项目中下载 cap 依赖
+2. 命令行运行 `StarResonanceAutoMod.exe` + 对应参数
+3. 选择网络接口(先带 `-a` 参数尝试自动选择)
+4. 重新登录游戏, 选择角色
+5. 等待程序自动解析模组并显示最优搭配
 
 ### 命令行参数
 
@@ -19,8 +20,10 @@
 - `--interface <索引>` 或 `-i <索引>`: 指定网络接口索引
 - `--auto` 或 `-a`: 自动检测默认网络接口
 - `--debug` 或 `-d`: 启用调试模式
-- `--category <类型>` 或 `-c <类型>`: 指定模组类型 (攻击/守护/辅助)
+- `--category <类型>` 或 `-c <类型>`: 指定模组类型 (攻击/守护/辅助/全部，默认: 全部)
 - `--attributes <属性1> <属性2> ...` 或 `-attr <属性1> <属性2> ...`: 指定要筛选的属性词条
+- `--exclude-attributes <属性1> <属性2> ...` 或 `-exattr <属性1> <属性2> ...`: 指定要排除的属性词条
+- `--match-count <数量>` 或 `-mc <数量>`: 模组需要包含的指定词条数量 (默认: 1)
 
 ### 使用示例
 
@@ -28,20 +31,26 @@
 # 列出网络接口
 .\StarResonanceAutoMod.exe --list
 
-# 筛选攻击类型模组
-.\StarResonanceAutoMod.exe --category 攻击
+# 筛选包含特定属性的模组（从全部模组中筛选）
+.\StarResonanceAutoMod.exe -attr 精英打击 特攻伤害 智力加持
 
-# 筛选包含特定属性的攻击模组
-.\StarResonanceAutoMod.exe --category 攻击 --attributes 精英打击 特攻伤害 智力加持
+# 筛选包含特定属性的模组，但排除治疗相关属性
+.\StarResonanceAutoMod.exe -attr 智力加持 暴击专注 -exattr 特攻治疗加持 专精治疗加持
 
-# 自动检测网络接口并筛选守护模组
-.\StarResonanceAutoMod.exe --auto --category 守护
+# 筛选包含至少2个指定属性的模组
+.\StarResonanceAutoMod.exe -attr 智力加持 特攻伤害 暴击专注 -mc 2
 
 # 指定网络接口并启用调试模式
 .\StarResonanceAutoMod.exe --interface 0 --debug
 ```
 
 python 主程序接口为 `star_railway_monitor.py`
+
+python 依赖安装:
+
+```bash
+pip install -r requirements.txt
+```
 
 ```python
 python star_railway_monitor.py -a

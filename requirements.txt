@@ -1,0 +1,4 @@
+scapy>=2.5.0
+zstandard>=0.21.0
+protobuf>=4.21.0
+pyinstaller>=5.0.0 
