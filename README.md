@@ -31,11 +31,14 @@
 # 列出网络接口
 .\StarResonanceAutoMod.exe --list
 
-# 筛选包含特定属性的模组（从全部模组中筛选）
+# 自动选择网络端口
+.\StarResonanceAutoMod.exe -a
+
+# 筛选包含特定属性的模组(从全部模组中筛选)
 .\StarResonanceAutoMod.exe -attr 精英打击 特攻伤害 智力加持
 
-# 筛选包含特定属性的模组，但排除治疗相关属性
-.\StarResonanceAutoMod.exe -attr 智力加持 暴击专注 -exattr 特攻治疗加持 专精治疗加持
+# 筛选包含特定属性的模组并去除特定属性的模组(想要智力+暴击的组合但施法专注和攻速专注词条没用, 直接剔除)
+.\StarResonanceAutoMod.exe -attr 智力加持 暴击专注 -exattr 施法专注 攻速专注
 
 # 筛选包含至少2个指定属性的模组
 .\StarResonanceAutoMod.exe -attr 智力加持 特攻伤害 暴击专注 -mc 2
@@ -77,6 +80,14 @@ python star_railway_monitor.py -a
 - 幸运专注
 - 抵御魔法
 - 抵御物理
+- 极-绝境守护
+- 极-伤害叠加
+- 极-灵活身法
+- 极-生命凝聚
+- 极-急救措施
+- 极-生命波动
+- 极-生命汲取
+- 极-全队幸暴
 
 ---
 
