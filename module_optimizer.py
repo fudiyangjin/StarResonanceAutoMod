@@ -11,7 +11,8 @@ from itertools import combinations
 from logging_config import get_logger
 from module_types import (
     ModuleInfo, ModuleType, ModuleAttrType, ModuleCategory,
-    MODULE_CATEGORY_MAP, ATTR_THRESHOLDS
+    MODULE_CATEGORY_MAP, ATTR_THRESHOLDS, BASIC_ATTR_POWER_MAP, SPECIAL_ATTR_POWER_MAP,
+    TOTAL_ATTR_POWER_MAP, BASIC_ATTR_IDS, SPECIAL_ATTR_IDS, ATTR_NAME_TYPE_MAP
 )
 
 # 获取日志器
@@ -42,7 +43,7 @@ class ModuleOptimizer:
         self._result_log_file = None
         
         self.local_search_iterations = 30  # 局部搜索迭代次数
-        self.max_solutions = 40            # 最大解数量
+        self.max_solutions = 60            # 最大解数量
         
         # 属性等级权重
         self.level_weights = {
@@ -136,6 +137,82 @@ class ModuleOptimizer:
         self.logger.info(f"涉及的属性类型: {list(attr_modules.keys())}")
         return filtered_modules
     
+    def _get_attr_type_by_name(self, attr_name: str, modules: List[ModuleInfo]) -> str:
+        """根据属性名称判断属性类型
+        
+        Args:
+            attr_name: 属性名称
+            modules: 模组列表
+            
+        Returns:
+            str: 'basic' 或 'special'
+        """
+        # 使用预置的映射快速判断
+        if attr_name in ATTR_NAME_TYPE_MAP:
+            return ATTR_NAME_TYPE_MAP[attr_name]
+        
+        # 如果映射中没有，则遍历模组查找（备用方案）
+        for module in modules:
+            for part in module.parts:
+                if part.name == attr_name:
+                    if part.id in BASIC_ATTR_IDS:
+                        return 'basic'
+                    elif part.id in SPECIAL_ATTR_IDS:
+                        return 'special'
+                    else:
+                        # 未知属性类型，默认为基础词条
+                        return 'basic'
+        
+        # 如果找不到，默认为基础词条
+        return 'basic'
+    
+    def calculate_combat_power(self, modules: List[ModuleInfo]) -> Tuple[int, Dict[str, int]]:
+        """计算模组搭配的战斗力
+        
+        Args:
+            modules: 模组列表
+            
+        Returns:
+            Tuple[int, Dict[str, int]]: (战斗力值, 属性分布字典)
+        """
+        # 计算属性分布
+        attr_breakdown = {}
+        for module in modules:
+            for part in module.parts:
+                attr_name = part.name
+                if attr_name in attr_breakdown:
+                    attr_breakdown[attr_name] += part.value
+                else:
+                    attr_breakdown[attr_name] = part.value
+        
+        # 计算属性阈值战力
+        threshold_power = 0
+        for attr_name, attr_value in attr_breakdown.items():
+            max_level = 0
+            for i, threshold in enumerate(ATTR_THRESHOLDS):
+                if attr_value >= threshold:
+                    max_level = i + 1
+                else:
+                    break
+            
+            attr_type = ATTR_NAME_TYPE_MAP.get(attr_name, "basic")
+            if attr_type == 'special':
+                power_map = SPECIAL_ATTR_POWER_MAP
+            else:
+                power_map = BASIC_ATTR_POWER_MAP
+            
+            if max_level > 0:
+                threshold_power += power_map.get(max_level, 0)
+        
+        # 计算模组总属性值战力
+        total_attr_value = sum(attr_breakdown.values())
+        total_attr_power = TOTAL_ATTR_POWER_MAP.get(total_attr_value, 0)
+        
+        # 总战斗力 = 属性阈值战力 + 模组总属性值战力
+        total_power = threshold_power + total_attr_power
+        
+        return total_power, attr_breakdown
+    
     def calculate_solution_score(self, modules: List[ModuleInfo]) -> Tuple[float, Dict[str, int]]:
         """计算模组搭配的综合评分
         
@@ -219,7 +296,7 @@ class ModuleOptimizer:
                     continue
                 
                 test_modules = current_modules + [module]
-                score, _ = self.calculate_solution_score(test_modules)
+                score, _ = self.calculate_combat_power(test_modules)
                 
                 candidates.append(module)
                 candidate_scores.append(score)
@@ -240,7 +317,7 @@ class ModuleOptimizer:
             current_modules.append(best_module)
         
         # 计算最终评分
-        final_score, attr_breakdown = self.calculate_solution_score(current_modules)
+        final_score, attr_breakdown = self.calculate_combat_power(current_modules)
         
         return ModuleSolution(
             modules=current_modules,
@@ -276,7 +353,7 @@ class ModuleOptimizer:
                     new_modules = best_solution.modules.copy()
                     new_modules[i] = new_module
                     
-                    new_score, new_attr_breakdown = self.calculate_solution_score(new_modules)
+                    new_score, new_attr_breakdown = self.calculate_combat_power(new_modules)
                     
                     if new_score > best_solution.score:
                         best_solution = ModuleSolution(
@@ -378,8 +455,8 @@ class ModuleOptimizer:
         print(f"总属性值: {total_value}")
         self._log_result(f"总属性值: {total_value}")
         
-        print(f"综合评分: {solution.score:.2f}")
-        self._log_result(f"综合评分: {solution.score:.2f}")
+        print(f"战斗力: {solution.score:.2f}")
+        self._log_result(f"战斗力: {solution.score:.2f}")
         
         print("\n模组列表:")
         self._log_result("\n模组列表:")
@@ -443,8 +520,8 @@ class ModuleOptimizer:
         print(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
         self._log_result(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
         
-        print(f"最高评分: {optimal_solutions[0].score:.2f}")
-        self._log_result(f"最高评分: {optimal_solutions[0].score:.2f}")
+        print(f"最高战斗力: {optimal_solutions[0].score:.2f}")
+        self._log_result(f"最高战斗力: {optimal_solutions[0].score:.2f}")
         
         print(f"{'='*50}")
         self._log_result(f"{'='*50}")
