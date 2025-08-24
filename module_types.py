@@ -11,10 +11,13 @@ class ModuleType(Enum):
     """模组类型枚举"""
     BASIC_ATTACK = 5500101
     HIGH_PERFORMANCE_ATTACK = 5500102
+    EXCELLENT_ATTACK = 5500103
     BASIC_HEALING = 5500201
     HIGH_PERFORMANCE_HEALING = 5500202
+    EXCELLENT_HEALING = 5500203
     BASIC_PROTECTION = 5500301
     HIGH_PERFORMANCE_PROTECTION = 5500302
+    EXCELLENT_PROTECTION = 5500303
 
 
 class ModuleAttrType(Enum):
@@ -32,6 +35,14 @@ class ModuleAttrType(Enum):
     LUCK_FOCUS = 1410
     MAGIC_RESISTANCE = 1307
     PHYSICAL_RESISTANCE = 1308
+    EXTREME_DAMAGE_STACK = 2104
+    EXTREME_FLEXIBLE_MOVEMENT = 2105
+    EXTREME_LIFE_CONVERGENCE = 2204
+    EXTREME_EMERGENCY_MEASURES = 2205
+    EXTREME_LIFE_FLUCTUATION = 2404
+    EXTREME_LIFE_DRAIN = 2405
+    EXTREME_TEAM_CRIT = 2406
+    EXTREME_DESPERATE_GUARDIAN = 2304
 
 
 class ModuleCategory(Enum):
@@ -46,10 +57,13 @@ class ModuleCategory(Enum):
 MODULE_NAMES = {
     ModuleType.BASIC_ATTACK.value: "基础攻击",
     ModuleType.HIGH_PERFORMANCE_ATTACK.value: "高性能攻击",
+    ModuleType.EXCELLENT_ATTACK.value: "卓越攻击",
     ModuleType.BASIC_HEALING.value: "基础治疗",
     ModuleType.HIGH_PERFORMANCE_HEALING.value: "高性能治疗",
+    ModuleType.EXCELLENT_HEALING.value: "卓越辅助",
     ModuleType.BASIC_PROTECTION.value: "基础防护",
     ModuleType.HIGH_PERFORMANCE_PROTECTION.value: "高性能守护",
+    ModuleType.EXCELLENT_PROTECTION.value: "卓越守护",
 }
 
 # 模组属性名称映射
@@ -67,16 +81,27 @@ MODULE_ATTR_NAMES = {
     ModuleAttrType.LUCK_FOCUS.value: "幸运专注",
     ModuleAttrType.MAGIC_RESISTANCE.value: "抵御魔法",
     ModuleAttrType.PHYSICAL_RESISTANCE.value: "抵御物理",
+    ModuleAttrType.EXTREME_DAMAGE_STACK.value: "极-伤害叠加",
+    ModuleAttrType.EXTREME_FLEXIBLE_MOVEMENT.value: "极-灵活身法",
+    ModuleAttrType.EXTREME_LIFE_CONVERGENCE.value: "极-生命凝聚",
+    ModuleAttrType.EXTREME_EMERGENCY_MEASURES.value: "极-急救措施",
+    ModuleAttrType.EXTREME_LIFE_FLUCTUATION.value: "极-生命波动",
+    ModuleAttrType.EXTREME_LIFE_DRAIN.value: "极-生命汲取",
+    ModuleAttrType.EXTREME_TEAM_CRIT.value: "极-全队幸暴",
+    ModuleAttrType.EXTREME_DESPERATE_GUARDIAN.value: "极-绝境守护",
 }
 
 # 模组类型到分类的映射
 MODULE_CATEGORY_MAP = {
     ModuleType.BASIC_ATTACK.value: ModuleCategory.ATTACK,
     ModuleType.HIGH_PERFORMANCE_ATTACK.value: ModuleCategory.ATTACK,
+    ModuleType.EXCELLENT_ATTACK.value: ModuleCategory.ATTACK, 
     ModuleType.BASIC_PROTECTION.value: ModuleCategory.GUARDIAN,
     ModuleType.HIGH_PERFORMANCE_PROTECTION.value: ModuleCategory.GUARDIAN,
+    ModuleType.EXCELLENT_PROTECTION.value: ModuleCategory.GUARDIAN,
     ModuleType.BASIC_HEALING.value: ModuleCategory.SUPPORT,
     ModuleType.HIGH_PERFORMANCE_HEALING.value: ModuleCategory.SUPPORT,
+    ModuleType.EXCELLENT_HEALING.value: ModuleCategory.SUPPORT,
 }
 
 # 属性阈值和效果等级
