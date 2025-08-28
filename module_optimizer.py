@@ -1,18 +1,26 @@
 """
-模组搭配优化器 - 贪心+局部搜索版本
+模组搭配优化器 - 多策略并行, 使用C++进行核心运算
 """
 
 import logging
 import os
 import random
+import multiprocessing as mp
 from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass
 from itertools import combinations
 from logging_config import get_logger
 from module_types import (
-    ModuleInfo, ModuleType, ModuleAttrType, ModuleCategory,
+    ModuleInfo, ModuleType, ModulePart, ModuleAttrType, ModuleCategory,
     MODULE_CATEGORY_MAP, ATTR_THRESHOLDS, BASIC_ATTR_POWER_MAP, SPECIAL_ATTR_POWER_MAP,
     TOTAL_ATTR_POWER_MAP, BASIC_ATTR_IDS, SPECIAL_ATTR_IDS, ATTR_NAME_TYPE_MAP
+)
+from cpp_extension.module_optimizer_cpp import (
+    ModulePart as CppModulePart,
+    ModuleInfo as CppModuleInfo,
+    ModuleSolution as CppModuleSolution,
+    strategy_enumeration_cpp,
+    optimize_modules_cpp
 )
 
 # 获取日志器
@@ -36,24 +44,21 @@ class ModuleSolution:
 class ModuleOptimizer:
     """模组搭配优化器"""
     
-    def __init__(self):
+    def __init__(self, target_attributes: List[str] = None):
         """初始化模组搭配优化器
+        
+        Args:
+            target_attributes: 目标属性列表，用于优先筛选
         """
         self.logger = logger
         self._result_log_file = None
+        self.target_attributes = target_attributes or []
         
-        self.local_search_iterations = 30  # 局部搜索迭代次数
-        self.max_solutions = 60            # 最大解数量
-        
-        # 属性等级权重
-        self.level_weights = {
-            1: 1.0,   # 1级权重
-            2: 2.0,   # 2级权重
-            3: 3.0,   # 3级权重
-            4: 4.0,   # 4级权重
-            5: 20.0,  # 5级权重
-            6: 30.0   # 6级权重
-        }
+        self.local_search_iterations = 50  # 局部搜索迭代次数
+        self.max_attempts = 20             # 贪心+局部搜索最大尝试次数
+        self.max_solutions = 100           # 最大解数量
+        self.max_workers = 8               # 最大线程数
+        self.enumeration_num = 150         # 并行策略中最大枚举模组数
     
     def _get_current_log_file(self) -> Optional[str]:
         """获取当前日志文件路径
@@ -115,6 +120,65 @@ class ModuleOptimizer:
         """
         self.logger.info(f"开始预筛选，原始模组数量: {len(modules)}")
         
+        if self.target_attributes:
+            self.logger.info(f"使用指定属性优先级筛选: {self.target_attributes}")
+            return self._prefilter_by_target_attributes(modules)
+        else:
+            return self._prefilter_by_all_attributes(modules)
+    
+    def _prefilter_by_target_attributes(self, modules: List[ModuleInfo]) -> List[ModuleInfo]:
+        """基于指定属性进行预筛选
+        
+        Args:
+            modules: 所有模组列表
+            
+        Returns:
+            List[ModuleInfo]: 筛选后的候选模组列表
+        """
+        
+        # 根据总属性取优质模组
+        module_scores = []
+        for module in modules:
+            target_attr_sum = 0
+            for part in module.parts:
+                if part.name in self.target_attributes:
+                    target_attr_sum += part.value
+            
+            module_scores.append((module, target_attr_sum))
+        
+        sorted_modules = sorted(module_scores, key=lambda x: x[1], reverse=True)
+        top_modules = [item[0] for item in sorted_modules[:self.enumeration_num]]
+        
+        # 每种属性再取优质模组
+        attr_modules = {}
+        for module in modules:
+            for part in module.parts:
+                if part.name in self.target_attributes:
+                    if part.name not in attr_modules:
+                        attr_modules[part.name] = []
+                    attr_modules[part.name].append((module, part.value))
+        
+        for attr_name, module_values in attr_modules.items():
+            sorted_by_attr = sorted(module_values, key=lambda x: x[1], reverse=True)
+            top_attr_modules = [item[0] for item in sorted_by_attr[:30]]
+            top_modules.extend(top_attr_modules)
+        
+        # 去重
+        candidate_modules = list(set(top_modules))
+        
+        self.logger.info(f"基于指定属性筛选完成，筛选后模组数量: {len(candidate_modules)}")
+        self.logger.info(f"涉及的指定属性: {list(attr_modules.keys())}")
+        return candidate_modules
+    
+    def _prefilter_by_all_attributes(self, modules: List[ModuleInfo]) -> List[ModuleInfo]:
+        """基于所有属性进行预筛选
+        
+        Args:
+            modules: 所有模组列表
+            
+        Returns:
+            List[ModuleInfo]: 筛选后的候选模组列表
+        """
         # 统计所有出现的属性类型
         attr_modules = {}
         for module in modules:
@@ -133,245 +197,83 @@ class ModuleOptimizer:
         
         filtered_modules = list(candidate_modules)
         
-        self.logger.info(f"预筛选完成，筛选后模组数量: {len(filtered_modules)}")
+        self.logger.info(f"基于所有属性筛选完成，筛选后模组数量: {len(filtered_modules)}")
         self.logger.info(f"涉及的属性类型: {list(attr_modules.keys())}")
         return filtered_modules
     
-    def _get_attr_type_by_name(self, attr_name: str, modules: List[ModuleInfo]) -> str:
-        """根据属性名称判断属性类型
+    def _prefilter_for_enumeration(self, modules: List[ModuleInfo]) -> List[ModuleInfo]:
+        """返回enumeration_num个属性分布平均的模组
         
         Args:
-            attr_name: 属性名称
-            modules: 模组列表
+            modules: 所有模组列表
             
         Returns:
-            str: 'basic' 或 'special'
+            List[ModuleInfo]: 筛选后的enumeration_num个候选模组列表
         """
-        # 使用预置的映射快速判断
-        if attr_name in ATTR_NAME_TYPE_MAP:
-            return ATTR_NAME_TYPE_MAP[attr_name]
         
-        # 如果映射中没有，则遍历模组查找（备用方案）
-        for module in modules:
-            for part in module.parts:
-                if part.name == attr_name:
-                    if part.id in BASIC_ATTR_IDS:
-                        return 'basic'
-                    elif part.id in SPECIAL_ATTR_IDS:
-                        return 'special'
-                    else:
-                        # 未知属性类型，默认为基础词条
-                        return 'basic'
-        
-        # 如果找不到，默认为基础词条
-        return 'basic'
-    
-    def calculate_combat_power(self, modules: List[ModuleInfo]) -> Tuple[int, Dict[str, int]]:
-        """计算模组搭配的战斗力
-        
-        Args:
-            modules: 模组列表
-            
-        Returns:
-            Tuple[int, Dict[str, int]]: (战斗力值, 属性分布字典)
-        """
-        # 计算属性分布
-        attr_breakdown = {}
+        if len(modules) <= self.enumeration_num:
+            return modules
+
+        attr_modules = {}
         for module in modules:
             for part in module.parts:
                 attr_name = part.name
-                if attr_name in attr_breakdown:
-                    attr_breakdown[attr_name] += part.value
-                else:
-                    attr_breakdown[attr_name] = part.value
+                if attr_name not in attr_modules:
+                    attr_modules[attr_name] = []
+                attr_modules[attr_name].append((module, part.value))
         
-        # 计算属性阈值战力
-        threshold_power = 0
-        for attr_name, attr_value in attr_breakdown.items():
-            max_level = 0
-            for i, threshold in enumerate(ATTR_THRESHOLDS):
-                if attr_value >= threshold:
-                    max_level = i + 1
-                else:
-                    break
+        attr_count = len(attr_modules)
+        if attr_count == 0:
+            return modules[:self.enumeration_num] if len(modules) > self.enumeration_num else modules
+        
+        # 为每种属性分配模组数量，确保总数接近self.enumeration_num
+        target_per_attr = max(1, self.enumeration_num // attr_count)
+        remaining_slots = self.enumeration_num - (target_per_attr * attr_count)
+        
+        candidate_modules = []
+        used_modules = set()
+        
+        # 按属性类型分配模组
+        for attr_name, module_values in attr_modules.items():
+            sorted_by_attr = sorted(module_values, key=lambda x: x[1], reverse=True)
             
-            attr_type = ATTR_NAME_TYPE_MAP.get(attr_name, "basic")
-            if attr_type == 'special':
-                power_map = SPECIAL_ATTR_POWER_MAP
-            else:
-                power_map = BASIC_ATTR_POWER_MAP
+            current_target = target_per_attr
+            if remaining_slots > 0:
+                current_target += 1
+                remaining_slots -= 1
             
-            if max_level > 0:
-                threshold_power += power_map.get(max_level, 0)
+            available_modules = [item[0] for item in sorted_by_attr[:current_target]]
+            candidate_modules.extend(available_modules)
+            used_modules.update(available_modules)
         
-        # 计算模组总属性值战力
-        total_attr_value = sum(attr_breakdown.values())
-        total_attr_power = TOTAL_ATTR_POWER_MAP.get(total_attr_value, 0)
+        # 去重
+        unique_modules = list(set(candidate_modules))
         
-        # 总战斗力 = 属性阈值战力 + 模组总属性值战力
-        total_power = threshold_power + total_attr_power
-        
-        return total_power, attr_breakdown
-    
-    def calculate_solution_score(self, modules: List[ModuleInfo]) -> Tuple[float, Dict[str, int]]:
-        """计算模组搭配的综合评分
-        
-        Args:
-            modules: 模组列表
+        # 可能筛完模组数量不足enumeration_num了, 补充到enumeration_num
+        if len(unique_modules) < self.enumeration_num:
+            remaining_modules = [m for m in modules if m not in used_modules]
             
-        Returns:
-            Tuple[float, Dict[str, int]]: (综合评分, 属性分布字典)
-        """
-        # 计算属性分布
-        attr_breakdown = {}
-        for module in modules:
-            for part in module.parts:
-                attr_name = part.name
-                if attr_name in attr_breakdown:
-                    attr_breakdown[attr_name] += part.value
-                else:
-                    attr_breakdown[attr_name] = part.value
-        
-        # 计算属性分数
-        high_level_score = 0.0
-        for attr_name, attr_value in attr_breakdown.items():
-            # 获得属性等级
-            threshold_level = 0
-            for i, threshold in enumerate(ATTR_THRESHOLDS):
-                if attr_value >= threshold:
-                    threshold_level = i + 1 
-                else:
-                    break
+            # 总属性值排序剩余模组
+            remaining_scores = []
+            for module in remaining_modules:
+                total_value = sum(part.value for part in module.parts)
+                remaining_scores.append((module, total_value))
             
-            # 计算权重得分
-            if threshold_level > 0:
-                weight = self.level_weights.get(threshold_level, 1.0)
-                high_level_score += weight
-        
-        # 计算总属性值
-        total_value = sum(attr_breakdown.values())
-        
-        # 计算属性浪费
-        total_waste = 0.0
-        for attr_name, attr_value in attr_breakdown.items():
-            # 找到该属性值能达到的最高阈值
-            max_threshold = 0
-            for threshold in ATTR_THRESHOLDS:
-                if attr_value >= threshold:
-                    max_threshold = threshold
-                else:
-                    break
+            remaining_scores.sort(key=lambda x: x[1], reverse=True)
             
-            # 计算超过阈值的浪费
-            waste = attr_value - max_threshold
-            total_waste += waste
+            # 补充模组
+            needed_count = self.enumeration_num - len(unique_modules)
+            for i in range(min(needed_count, len(remaining_scores))):
+                unique_modules.append(remaining_scores[i][0])
         
-        # 综合评分：90%高等级属性 + 5%总属性值 - 5%属性浪费
-        score = 0.9 * high_level_score + 0.05 * total_value - 0.05 * total_waste
+        if len(unique_modules) > self.enumeration_num:
+            unique_modules = unique_modules[:self.enumeration_num]
         
-        return score, attr_breakdown
-    
-    def greedy_construct_solution(self, modules: List[ModuleInfo]) -> ModuleSolution:
-        """初始值构造
+        self.logger.debug(f"枚举策略预筛选完成，筛选后模组数量: {len(unique_modules)}")
+        self.logger.debug(f"涉及的属性类型: {list(attr_modules.keys())}")
+        self.logger.debug(f"每种属性平均分配模组数量: {target_per_attr}")
         
-        Args:
-            modules: 候选模组列表
-            
-        Returns:
-            ModuleSolution: 构造的初始解, 如果模组数量不足则返回None
-        """
-        if len(modules) < 4:
-            return None
-        
-        # 随机选择起始模组
-        current_modules = [random.choice(modules)]
-        
-        # 贪心添加模组
-        for _ in range(3):
-            candidates = []
-            candidate_scores = []
-            
-            for module in modules:
-                if module in current_modules:
-                    continue
-                
-                test_modules = current_modules + [module]
-                score, _ = self.calculate_combat_power(test_modules)
-                
-                candidates.append(module)
-                candidate_scores.append(score)
-            
-            if not candidates:
-                break
-            
-            # 80%概率选择最优，20%概率随机选择前3个
-            if random.random() < 0.8:
-                # 选择最优模组
-                best_idx = candidate_scores.index(max(candidate_scores))
-                best_module = candidates[best_idx]
-            else:
-                # 随机选择前3个候选
-                top_candidates = sorted(zip(candidate_scores, candidates), reverse=True)[:3]
-                best_module = random.choice([c for _, c in top_candidates])
-            
-            current_modules.append(best_module)
-        
-        # 计算最终评分
-        final_score, attr_breakdown = self.calculate_combat_power(current_modules)
-        
-        return ModuleSolution(
-            modules=current_modules,
-            score=final_score,
-            attr_breakdown=attr_breakdown
-        )
-    
-    def local_search_improve(self, solution: ModuleSolution, all_modules: List[ModuleInfo]) -> ModuleSolution:
-        """局部搜索改进解
-        
-        Args:
-            solution: 初始解
-            all_modules: 所有候选模组列表
-            
-        Returns:
-            ModuleSolution: 改进后的解
-        """
-        best_solution = solution
-        
-        for iteration in range(self.local_search_iterations):
-            improved = False
-            
-            # 尝试替换每个模组
-            for i in range(len(best_solution.modules)):
-                # 随机选择候选模组
-                candidates = random.sample(all_modules, min(20, len(all_modules)))
-                
-                for new_module in candidates:
-                    if new_module in best_solution.modules:
-                        continue
-                    
-                    # 尝试替换
-                    new_modules = best_solution.modules.copy()
-                    new_modules[i] = new_module
-                    
-                    new_score, new_attr_breakdown = self.calculate_combat_power(new_modules)
-                    
-                    if new_score > best_solution.score:
-                        best_solution = ModuleSolution(
-                            modules=new_modules,
-                            score=new_score,
-                            attr_breakdown=new_attr_breakdown
-                        )
-                        improved = True
-                        break
-                
-                if improved:
-                    break
-            
-            # 如果连续没有改进，提前结束
-            if not improved and iteration > self.local_search_iterations // 2:
-                break
-        
-        return best_solution
+        return unique_modules
     
     def optimize_modules(self, modules: List[ModuleInfo], category: ModuleCategory, top_n: int = 40) -> List[ModuleSolution]:
         """优化模组搭配
@@ -403,40 +305,141 @@ class ModuleOptimizer:
         
         # 筛选模组
         candidate_modules = self.prefilter_modules(filtered_modules)
-        
-        solutions = []
-        seen_combinations = set()
-        
-        attempts = 0
-        max_attempts = self.max_solutions * 20
-        
-        while len(solutions) < self.max_solutions and attempts < max_attempts:
-            attempts += 1
-            
-            # 贪心构造初始解
-            initial_solution = self.greedy_construct_solution(candidate_modules)
-            if not initial_solution:
-                continue
-            
-            # 局部搜索
-            improved_solution = self.local_search_improve(initial_solution, candidate_modules)
-            
-            # 去重
-            improved_module_ids = tuple(sorted([module.uuid for module in improved_solution.modules]))
-            if improved_module_ids not in seen_combinations:
-                seen_combinations.add(improved_module_ids)
-                solutions.append(improved_solution)
-        
-        # 按评分排序
-        solutions.sort(key=lambda x: x.score, reverse=True)
-        
+        greedy_solutions = []
+        if len(candidate_modules) > self.enumeration_num:
+            self.logger.info("并行策略开始")
+            num_processes = min(2, mp.cpu_count())
+
+            # 创建进程池
+            with mp.Pool(processes=num_processes) as pool:
+
+                greedy_future = pool.apply_async(self._strategy_greedy_local_search, (filtered_modules,))
+                enum_future = pool.apply_async(self._strategy_enumeration, (filtered_modules,))
+                
+                greedy_solutions = greedy_future.get()
+                enum_solutions = enum_future.get()
+        else:
+            # 枚举开始
+            enum_solutions = self._strategy_enumeration(filtered_modules)
+
+        all_solution = greedy_solutions + enum_solutions
+        unique_solutions = self._complete_deduplicate(all_solution)
+        unique_solutions.sort(key=lambda x: x.score, reverse=True)
         # 返回前top_n个解
-        result = solutions[:top_n]
-        self.logger.debug(f"第{attempts}次尝试，找到{len(result)}个最优解")
+        result = unique_solutions[:top_n]
         self.logger.info(f"优化完成，返回{len(result)}个最优解")
         
         return result
     
+    def _strategy_enumeration(self, modules: List[ModuleInfo]) -> List[ModuleSolution]:
+        """枚举
+        
+        Args:
+            modules: 所有模组列表
+            
+        Returns:
+            List[ModuleSolution]: 最优解列表
+        """
+ 
+        # 为枚举策略专门筛选enumeration_num个属性分布平均的优质模组
+        candidate_modules = self._prefilter_for_enumeration(modules)
+        
+        cpp_modules = self._convert_to_cpp_modules(candidate_modules)
+        
+        cpp_solutions = strategy_enumeration_cpp(cpp_modules, self.max_solutions, self.max_workers)
+        
+        result = self._convert_from_cpp_solutions(cpp_solutions)
+
+        return result
+    
+    def _strategy_greedy_local_search(self, modules: List[ModuleInfo]) -> List[ModuleSolution]:
+        """贪心+局部搜索
+        
+        Args:
+            modules: 所有模组列表
+            
+        Returns:
+            List[ModuleSolution]: 最优解列表
+        """
+        
+        cpp_modules = self._convert_to_cpp_modules(modules)
+        
+        cpp_solutions = optimize_modules_cpp(cpp_modules, self.max_solutions, self.max_attempts, self.local_search_iterations)
+        
+        result = self._convert_from_cpp_solutions(cpp_solutions)
+        
+        return result
+    
+    def _complete_deduplicate(self, solutions: List[ModuleSolution]) -> List[ModuleSolution]:
+        """模组去重++
+        
+        Args:
+            modules: 模组列表
+            
+        Returns:
+            List: 去重后的模组列表
+        """
+        
+        solutions.sort(key=lambda x: x.score, reverse=True)
+        
+        unique_solutions = []
+        seen_combinations = set()
+        
+        for solution in solutions:
+            module_ids = tuple(sorted([module.uuid for module in solution.modules]))
+            if module_ids not in seen_combinations:
+                seen_combinations.add(module_ids)
+                unique_solutions.append(solution)
+        
+        return unique_solutions
+    
+    def _convert_to_cpp_modules(self, modules: List[ModuleInfo]) -> List:
+        """python数据结构转C++
+        
+        Args:
+            modules: 模组列表
+            
+        Returns:
+            List: C++模组结构
+        """
+
+        cpp_modules = []
+        for module in modules:
+            cpp_parts = []
+            for part in module.parts:
+                cpp_parts.append(CppModulePart(int(part.id), part.name, int(part.value)))
+            cpp_modules.append(CppModuleInfo(
+                module.name, module.config_id, module.uuid, 
+                module.quality, cpp_parts
+            ))
+        return cpp_modules
+    
+    def _convert_from_cpp_solutions(self, cpp_solutions: List) -> List[ModuleSolution]:
+        """C++数据结构转python
+        
+        Args:
+            modules: 模组列表
+            
+        Returns:
+            List: python模组结构
+        """
+        
+        solutions = []
+        for cpp_solution in cpp_solutions:
+            modules = []
+            for cpp_module in cpp_solution.modules:
+                parts = []
+                for cpp_part in cpp_module.parts:
+                    parts.append(ModulePart(cpp_part.id, cpp_part.name, cpp_part.value))
+                modules.append(ModuleInfo(
+                    cpp_module.name, cpp_module.config_id, cpp_module.uuid,
+                    cpp_module.quality, parts
+                ))
+            solutions.append(ModuleSolution(
+                modules, cpp_solution.score, cpp_solution.attr_breakdown
+            ))
+        return solutions
+
     def print_solution_details(self, solution: ModuleSolution, rank: int):
         """打印解详细信息
         
@@ -480,7 +483,7 @@ class ModuleOptimizer:
         Args:
             modules: 所有模组列表
             category: 目标模组类型，默认全部
-            top_n: 显示前N个最优解，默认40
+            top_n: 显示前N个最优解, 默认40
             
         Note:
             执行优化算法并格式化显示结果

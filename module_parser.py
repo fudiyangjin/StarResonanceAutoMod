@@ -94,7 +94,7 @@ class ModuleParser:
                 filtered_modules = modules
             
             # 筛选最优模组
-            self._optimize_module_combinations(filtered_modules, category)
+            self._optimize_module_combinations(filtered_modules, category, attributes)
         
         return modules
     
@@ -140,12 +140,13 @@ class ModuleParser:
         
         return filtered_modules
     
-    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str):
+    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None):
         """筛选模组并展示
         
         Args:
             modules: 模组列表
             category: 模组类型
+            attributes: 目标属性列表
         """
         
         try:
@@ -160,7 +161,7 @@ class ModuleParser:
             
             target_category = category_map.get(category, ModuleCategory.ALL)
             
-            optimizer = ModuleOptimizer()
+            optimizer = ModuleOptimizer(target_attributes=attributes)
             optimizer.optimize_and_display(modules, target_category, top_n=40)
             
             # 模组筛选完成后自动退出程序

@@ -212,7 +212,7 @@ class ModuleInfo:
     """模组信息"""
     name: str
     config_id: int
-    uuid: str
+    uuid: int
     quality: int
     parts: List[ModulePart]
     
