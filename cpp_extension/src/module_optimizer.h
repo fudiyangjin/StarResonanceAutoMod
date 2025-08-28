@@ -188,41 +188,50 @@ public:
     /// @brief 根据索引计算战斗力
     /// @param indices 模组索引数组
     /// @param modules 模组信息列表
+    /// @param target_attributes 目标属性名称列表(可选，默认为空)
     /// @return 返回战斗力数值
     static int CalculateCombatPowerByIndices(
         const std::vector<size_t>& indices,
-        const std::vector<ModuleInfo>& modules);
+        const std::vector<ModuleInfo>& modules,
+        const std::unordered_set<std::string>& target_attributes = {});
 
     /// @brief 处理组合范围
     /// @param start_combination 起始组合编号
     /// @param end_combination 结束组合编号
     /// @param n 总模组数量
     /// @param modules 模组信息列表
+    /// @param target_attributes 目标属性名称集合(可选，默认为空)
     /// @return 返回简易解列表
     static std::vector<LightweightSolution> ProcessCombinationRange(
         size_t start_combination, 
         size_t end_combination, 
         size_t n,
-        const std::vector<ModuleInfo>& modules
+        const std::vector<ModuleInfo>& modules,
+        const std::unordered_set<std::string>& target_attributes = {}
     );
 
     /// @brief 策略枚举算法
     /// @param modules 模组信息列表
+    /// @param target_attributes 目标属性名称集合(可选，默认为空)
+    /// @param max_solutions 最大解决方案数量，默认为60
     /// @param max_workers 最大工作线程数，默认为8
     /// @return 返回模组解决方案列表
     static std::vector<ModuleSolution> StrategyEnumeration(
         const std::vector<ModuleInfo>& modules,
+        const std::unordered_set<std::string>& target_attributes = {},
         int max_solutions = 60,
         int max_workers = 8);
 
     /// @brief 优化模组组合
     /// @param modules 模组信息列表
+    /// @param target_attributes 目标属性名称集合（可选，默认为空）
     /// @param max_solutions 最大解决方案数量，默认为60
     /// @param max_attempts_multiplier 最大尝试次数倍数，默认为20
     /// @param local_search_iterations 局部搜索迭代次数，默认为30
     /// @return 返回最优的模组解决方案列表
     static std::vector<ModuleSolution> OptimizeModules(
         const std::vector<ModuleInfo>& modules,
+        const std::unordered_set<std::string>& target_attributes = {},
         int max_solutions = 60,
         int max_attempts_multiplier = 20,
         int local_search_iterations = 30);
@@ -230,19 +239,23 @@ public:
 private:
     /// @brief 贪心构造解决方案
     /// @param modules 模组信息列表
+    /// @param target_attributes 目标属性名称集合（可选，默认为空）
     /// @return 返回简易解
     static LightweightSolution GreedyConstructSolutionByIndices(
-        const std::vector<ModuleInfo>& modules);
+        const std::vector<ModuleInfo>& modules,
+        const std::unordered_set<std::string>& target_attributes = {});
     
     /// @brief 局部搜索改进算法
     /// @param solution 初始解决方案
     /// @param all_modules 所有模组信息列表
     /// @param iterations 迭代次数，默认为10
+    /// @param target_attributes 目标属性名称集合（可选，默认为空）
     /// @return 返回改进后的简易解
     static LightweightSolution LocalSearchImproveByIndices(
         const LightweightSolution& solution,
         const std::vector<ModuleInfo>& all_modules,
-        int iterations = 10);
+        int iterations = 10,
+        const std::unordered_set<std::string>& target_attributes = {});
     
     /// @brief 检查组合是否唯一
     /// @param indices 当前组合索引

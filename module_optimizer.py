@@ -327,6 +327,11 @@ class ModuleOptimizer:
         unique_solutions.sort(key=lambda x: x.score, reverse=True)
         # 返回前top_n个解
         result = unique_solutions[:top_n]
+        
+        # 如果使用了目标属性，在最终返回前恢复原始评分
+        if self.target_attributes:
+            result = self._restore_original_scores(result)
+        
         self.logger.info(f"优化完成，返回{len(result)}个最优解")
         
         return result
@@ -346,7 +351,10 @@ class ModuleOptimizer:
         
         cpp_modules = self._convert_to_cpp_modules(candidate_modules)
         
-        cpp_solutions = strategy_enumeration_cpp(cpp_modules, self.max_solutions, self.max_workers)
+        # 将目标属性列表转换为集合
+        target_attrs_set = set(self.target_attributes) if self.target_attributes else set()
+        cpp_solutions = strategy_enumeration_cpp(
+            cpp_modules, target_attrs_set, self.max_solutions, self.max_workers)
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
 
@@ -364,7 +372,10 @@ class ModuleOptimizer:
         
         cpp_modules = self._convert_to_cpp_modules(modules)
         
-        cpp_solutions = optimize_modules_cpp(cpp_modules, self.max_solutions, self.max_attempts, self.local_search_iterations)
+        # 将目标属性列表转换为集合
+        target_attrs_set = set(self.target_attributes) if self.target_attributes else set()
+        cpp_solutions = optimize_modules_cpp(
+            cpp_modules, target_attrs_set, self.max_solutions, self.max_attempts, self.local_search_iterations)
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
         
@@ -435,11 +446,62 @@ class ModuleOptimizer:
                     cpp_module.name, cpp_module.config_id, cpp_module.uuid,
                     cpp_module.quality, parts
                 ))
+            
             solutions.append(ModuleSolution(
                 modules, cpp_solution.score, cpp_solution.attr_breakdown
             ))
         return solutions
-
+    
+    def _restore_original_scores(self, solutions: List[ModuleSolution]) -> List[ModuleSolution]:
+        """恢复原始评分
+        
+        Args:
+            solutions: 包含双倍评分的解决方案列表
+            
+        Returns:
+            List[ModuleSolution]: 恢复原始评分的解决方案列表
+        """
+        
+        restored_solutions = []
+        for solution in solutions:
+            # 重新计算原始评分
+            attr_breakdown = {}
+            for module in solution.modules:
+                for part in module.parts:
+                    attr_breakdown[part.name] = attr_breakdown.get(part.name, 0) + part.value
+            
+            # 计算原始战斗力
+            threshold_power = 0
+            total_attr_value = 0
+            
+            for attr_name, attr_value in attr_breakdown.items():
+                total_attr_value += attr_value
+                
+                # 计算属性等级
+                max_level = 0
+                for i, threshold in enumerate(ATTR_THRESHOLDS):
+                    if attr_value >= threshold:
+                        max_level = i + 1
+                    else:
+                        break
+                
+                if max_level > 0:
+                    attr_type = ATTR_NAME_TYPE_MAP.get(attr_name, "basic")
+                    if attr_type == "special":
+                        threshold_power += SPECIAL_ATTR_POWER_MAP.get(max_level, 0)
+                    else:
+                        threshold_power += BASIC_ATTR_POWER_MAP.get(max_level, 0)
+            
+            # 计算总属性战斗力
+            total_attr_power = TOTAL_ATTR_POWER_MAP.get(total_attr_value, 0)
+            original_score = threshold_power + total_attr_power
+            
+            restored_solutions.append(ModuleSolution(
+                solution.modules, original_score, attr_breakdown
+            ))
+        
+        return restored_solutions
+    
     def print_solution_details(self, solution: ModuleSolution, rank: int):
         """打印解详细信息
         

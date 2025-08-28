@@ -45,12 +45,14 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
     m.def("strategy_enumeration_cpp", &ModuleOptimizerCpp::StrategyEnumeration,
           "枚举",
           py::arg("modules"),
+          py::arg("target_attributes") = std::unordered_set<std::string>{},
           py::arg("max_solutions") = 60,
           py::arg("max_workers") = 8);
     
     m.def("optimize_modules_cpp", &ModuleOptimizerCpp::OptimizeModules,
           "贪心+局部搜索",
           py::arg("modules"),
+          py::arg("target_attributes") = std::unordered_set<std::string>{},
           py::arg("max_solutions") = 60,
           py::arg("max_attempts_multiplier") = 20,
           py::arg("local_search_iterations") = 30);

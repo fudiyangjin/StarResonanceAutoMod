@@ -32,7 +32,8 @@ std::vector<size_t> GetCombinationByIndex(size_t n, size_t r, size_t index) {
 
 std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     size_t start_combination, size_t end_combination, size_t n,
-    const std::vector<ModuleInfo>& modules) {
+    const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<std::string>& target_attributes) {
     
     size_t range_size = end_combination - start_combination;
     std::vector<LightweightSolution> solutions;
@@ -40,7 +41,7 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     
     for (size_t i = start_combination; i < end_combination; ++i) {
         auto combination = GetCombinationByIndex(n, 4, i);
-        int total_power = CalculateCombatPowerByIndices(combination, modules);
+        int total_power = CalculateCombatPowerByIndices(combination, modules, target_attributes);
         solutions.emplace_back(combination, total_power);
     }
     
@@ -110,7 +111,8 @@ std::pair<int, std::map<std::string, int>> ModuleOptimizerCpp::CalculateCombatPo
 
 int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
     const std::vector<size_t>& indices,
-    const std::vector<ModuleInfo>& modules) {
+    const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<std::string>& target_attributes) {
     
     std::unordered_map<std::string, int> attr_breakdown;
     attr_breakdown.reserve(20);
@@ -141,16 +143,24 @@ int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
             auto it = Constants::ATTR_NAME_TYPE_VALUES.find(attr_name);
             std::string attr_type = (it != Constants::ATTR_NAME_TYPE_VALUES.end()) ? it->second : "basic";
             
+            int base_power = 0;
             if (attr_type == "special") {
                 auto power_it = Constants::SPECIAL_ATTR_POWER_VALUES.find(max_level);
                 if (power_it != Constants::SPECIAL_ATTR_POWER_VALUES.end()) {
-                    threshold_power += power_it->second;
+                    base_power = power_it->second;
                 }
             } else {
                 auto power_it = Constants::BASIC_ATTR_POWER_VALUES.find(max_level);
                 if (power_it != Constants::BASIC_ATTR_POWER_VALUES.end()) {
-                    threshold_power += power_it->second;
+                    base_power = power_it->second;
                 }
+            }
+            
+            // 是否为-attr携带的属性, 如果是就双倍
+            if (!target_attributes.empty() && target_attributes.find(attr_name) != target_attributes.end()) {
+                threshold_power += base_power * 2;
+            } else {
+                threshold_power += base_power;
             }
         }
     }
@@ -167,6 +177,7 @@ int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
 
 std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<std::string>& target_attributes,
     int max_solutions,
     int max_workers) {
 
@@ -186,8 +197,8 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
         size_t start_combination = batch_idx * batch_size;
         size_t end_combination = std::min(start_combination + batch_size, total_combinations);
         
-        futures.push_back(pool->enqueue([start_combination, end_combination, n, &candidate_modules]() { 
-            return ProcessCombinationRange(start_combination, end_combination, n, candidate_modules);
+        futures.push_back(pool->enqueue([start_combination, end_combination, n, &candidate_modules, target_attributes]() { 
+            return ProcessCombinationRange(start_combination, end_combination, n, candidate_modules, target_attributes);
         }));
     }
     
@@ -245,6 +256,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
 
 std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(
     const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<std::string>& target_attributes,
     int max_solutions,
     int max_attempts_multiplier,
     int local_search_iterations) {
@@ -261,11 +273,11 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(
         attempts++;
         
         // 构造贪心初始解
-        auto solution = GreedyConstructSolutionByIndices(candidate_modules);
+        auto solution = GreedyConstructSolutionByIndices(candidate_modules, target_attributes);
         if (solution.module_indices.empty()) continue;
         
         // 局部搜索改进解
-        auto improved_solution = LocalSearchImproveByIndices(solution, candidate_modules, local_search_iterations);
+        auto improved_solution = LocalSearchImproveByIndices(solution, candidate_modules, local_search_iterations, target_attributes);
         
         // 去重
         if (IsCombinationUnique(improved_solution.module_indices, seen_combinations)) {
@@ -300,7 +312,8 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(
 }
 
 LightweightSolution ModuleOptimizerCpp::GreedyConstructSolutionByIndices(
-    const std::vector<ModuleInfo>& modules) {
+    const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<std::string>& target_attributes) {
     
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -329,7 +342,7 @@ LightweightSolution ModuleOptimizerCpp::GreedyConstructSolutionByIndices(
             std::vector<size_t> test_indices = current_indices;
             test_indices.push_back(module_idx);
             
-            int score = CalculateCombatPowerByIndices(test_indices, modules);
+            int score = CalculateCombatPowerByIndices(test_indices, modules, target_attributes);
             
             candidates.push_back(module_idx);
             candidate_scores.push_back(score);
@@ -358,7 +371,7 @@ LightweightSolution ModuleOptimizerCpp::GreedyConstructSolutionByIndices(
         }
     }
     
-    int final_score = CalculateCombatPowerByIndices(current_indices, modules);
+    int final_score = CalculateCombatPowerByIndices(current_indices, modules, target_attributes);
     
     return LightweightSolution(current_indices, final_score);
 }
@@ -366,7 +379,8 @@ LightweightSolution ModuleOptimizerCpp::GreedyConstructSolutionByIndices(
 LightweightSolution ModuleOptimizerCpp::LocalSearchImproveByIndices(
     const LightweightSolution& solution,
     const std::vector<ModuleInfo>& all_modules,
-    int iterations) {
+    int iterations,
+    const std::unordered_set<std::string>& target_attributes) {
     
     LightweightSolution best_solution = solution;
     
@@ -400,7 +414,7 @@ LightweightSolution ModuleOptimizerCpp::LocalSearchImproveByIndices(
                 std::vector<size_t> new_indices = best_solution.module_indices;
                 new_indices[i] = new_module_idx;
                 
-                int new_score = CalculateCombatPowerByIndices(new_indices, all_modules);
+                int new_score = CalculateCombatPowerByIndices(new_indices, all_modules, target_attributes);
                 
                 if (new_score > best_solution.score) {
                     best_solution = LightweightSolution(new_indices, new_score);
