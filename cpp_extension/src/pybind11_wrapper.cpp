@@ -46,6 +46,7 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
           "枚举",
           py::arg("modules"),
           py::arg("target_attributes") = std::unordered_set<int>{},
+          py::arg("exclude_attributes") = std::unordered_set<int>{},
           py::arg("max_solutions") = 60,
           py::arg("max_workers") = 8);
     
@@ -53,6 +54,7 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
           "贪心+局部搜索",
           py::arg("modules"),
           py::arg("target_attributes") = std::unordered_set<int>{},
+          py::arg("exclude_attributes") = std::unordered_set<int>{},
           py::arg("max_solutions") = 60,
           py::arg("max_attempts_multiplier") = 20,
           py::arg("local_search_iterations") = 30);

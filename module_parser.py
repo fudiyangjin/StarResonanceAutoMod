@@ -95,7 +95,7 @@ class ModuleParser:
                 filtered_modules = modules
             
             # 筛选最优模组
-            self._optimize_module_combinations(filtered_modules, category, attributes, enumeration_mode)
+            self._optimize_module_combinations(filtered_modules, category, attributes, exclude_attributes, enumeration_mode)
         
         return modules
     
@@ -117,15 +117,7 @@ class ModuleParser:
         for module in modules:
             # 获取模组的所有属性名称
             module_attrs = [part.name for part in module.parts]
-            
-            # 检查是否包含排除的属性
-            if exclude_attributes:
-                has_excluded_attr = any(attr in exclude_attributes for attr in module_attrs)
-                if has_excluded_attr:
-                    excluded_attrs = [attr for attr in module_attrs if attr in exclude_attributes]
-                    self.logger.debug(f"模组 '{module.name}' 包含排除属性: {', '.join(excluded_attrs)} (模组词条: {', '.join(module_attrs)})")
-                    continue
-            
+                        
             # 检查包含的属性数量
             if attributes:
                 matching_attrs = [attr for attr in module_attrs if attr in attributes]
@@ -141,13 +133,14 @@ class ModuleParser:
         
         return filtered_modules
     
-    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None, enumeration_mode: bool = False):
+    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None, exclude_attributes: List[str] = None, enumeration_mode: bool = False):
         """筛选模组并展示
         
         Args:
             modules: 模组列表
             category: 模组类型
             attributes: 目标属性列表
+            exclude_attributes: 排除属性列表
             enumeration_mode: 是否启用枚举模式
         """
         
@@ -163,7 +156,7 @@ class ModuleParser:
             
             target_category = category_map.get(category, ModuleCategory.ALL)
             
-            optimizer = ModuleOptimizer(target_attributes=attributes)
+            optimizer = ModuleOptimizer(target_attributes=attributes, exclude_attributes=exclude_attributes)
             
             optimizer.optimize_and_display(modules, target_category, top_n=40, enumeration_mode=enumeration_mode)
             

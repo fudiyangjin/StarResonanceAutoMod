@@ -45,15 +45,17 @@ class ModuleSolution:
 class ModuleOptimizer:
     """模组搭配优化器"""
     
-    def __init__(self, target_attributes: List[str] = None):
+    def __init__(self, target_attributes: List[str] = None, exclude_attributes: List[str] = None):
         """初始化模组搭配优化器
         
         Args:
             target_attributes: 目标属性列表，用于优先筛选
+            exclude_attributes: 排除属性列表, 用于权重为0
         """
         self.logger = logger
         self._result_log_file = None
         self.target_attributes = target_attributes or []
+        self.exclude_attributes = exclude_attributes or []
         
         self.local_search_iterations = 50  # 局部搜索迭代次数
         self.max_attempts = 20             # 贪心+局部搜索最大尝试次数
@@ -314,8 +316,16 @@ class ModuleOptimizer:
             for attr_str in self.target_attributes:
                 target_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
         target_attrs_set = set(target_attributes_id)
+        
+        # 将排除属性列表转换为集合
+        exclude_attributes_id = []
+        if self.exclude_attributes:
+            for attr_str in self.exclude_attributes:
+                exclude_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+        exclude_attrs_set = set(exclude_attributes_id)
+        
         cpp_solutions = strategy_enumeration_cpp(
-            cpp_modules, target_attrs_set, self.max_solutions, self.get_cpu_count())
+            cpp_modules, target_attrs_set, exclude_attrs_set, self.max_solutions, self.get_cpu_count())
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
 
@@ -339,8 +349,16 @@ class ModuleOptimizer:
             for attr_str in self.target_attributes:
                 target_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
         target_attrs_set = set(target_attributes_id)
+        
+        # 将排除属性列表转换为集合
+        exclude_attributes_id = []
+        if self.exclude_attributes:
+            for attr_str in self.exclude_attributes:
+                exclude_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+        exclude_attrs_set = set(exclude_attributes_id)
+        
         cpp_solutions = optimize_modules_cpp(
-            cpp_modules, target_attrs_set, self.max_solutions, self.max_attempts, self.local_search_iterations)
+            cpp_modules, target_attrs_set, exclude_attrs_set, self.max_solutions, self.max_attempts, self.local_search_iterations)
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
         
@@ -524,7 +542,7 @@ class ModuleOptimizer:
         self._log_result(f"{'='*50}")
         
         if enumeration_mode:
-            optimal_solutions = self.enumerate_modules(modules, category, top_n)
+            optimal_solutions = self.enumerate_modules(modules, category, self.max_solutions)
         else:
             optimal_solutions = self.optimize_modules(modules, category, top_n)
         
