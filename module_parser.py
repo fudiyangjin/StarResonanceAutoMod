@@ -24,7 +24,7 @@ class ModuleParser:
         self.logger = logger
     
     def parse_module_info(self, v_data: CharSerialize, category: str = "全部", attributes: List[str] = None, 
-                         exclude_attributes: List[str] = None, match_count: int = 1):
+                         exclude_attributes: List[str] = None, match_count: int = 1, enumeration_mode: bool = False):
         """
         解析模组信息
 
@@ -34,6 +34,7 @@ class ModuleParser:
             attributes: 要筛选的属性词条列表
             exclude_attributes: 要排除的属性词条列表
             match_count: 模组需要包含的指定词条数量
+            enumeration_mode: 是否启用枚举模式
         """
         self.logger.info("开始解析模组")
         
@@ -94,7 +95,7 @@ class ModuleParser:
                 filtered_modules = modules
             
             # 筛选最优模组
-            self._optimize_module_combinations(filtered_modules, category, attributes)
+            self._optimize_module_combinations(filtered_modules, category, attributes, enumeration_mode)
         
         return modules
     
@@ -140,13 +141,14 @@ class ModuleParser:
         
         return filtered_modules
     
-    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None):
+    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None, enumeration_mode: bool = False):
         """筛选模组并展示
         
         Args:
             modules: 模组列表
             category: 模组类型
             attributes: 目标属性列表
+            enumeration_mode: 是否启用枚举模式
         """
         
         try:
@@ -162,7 +164,8 @@ class ModuleParser:
             target_category = category_map.get(category, ModuleCategory.ALL)
             
             optimizer = ModuleOptimizer(target_attributes=attributes)
-            optimizer.optimize_and_display(modules, target_category, top_n=40)
+            
+            optimizer.optimize_and_display(modules, target_category, top_n=40, enumeration_mode=enumeration_mode)
             
             # 模组筛选完成后自动退出程序
             self.logger.info("=== 模组筛选完成，准备退出程序 ===")

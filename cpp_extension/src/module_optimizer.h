@@ -13,6 +13,7 @@
 #include <random>
 #include <algorithm>
 #include <array>
+#include <iostream>
 
 #include "simple_thread_pool.h"
 

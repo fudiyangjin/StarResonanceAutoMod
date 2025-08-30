@@ -23,7 +23,7 @@ class StarResonanceMonitor:
     """星痕共鸣监控器"""
     
     def __init__(self, interface_index: int = None, category: str = "全部", attributes: List[str] = None, 
-                 exclude_attributes: List[str] = None, match_count: int = 1):
+                 exclude_attributes: List[str] = None, match_count: int = 1, enumeration_mode: bool = False):
         """
         初始化监控器
         
@@ -33,12 +33,14 @@ class StarResonanceMonitor:
             attributes: 要筛选的属性词条列表
             exclude_attributes: 要排除的属性词条列表
             match_count: 模组需要包含的指定词条数量
+            enumeration_mode: 是否启用枚举模式
         """
         self.interface_index = interface_index
         self.category = category
         self.attributes = attributes or []
         self.exclude_attributes = exclude_attributes or []
         self.match_count = match_count
+        self.enumeration_mode = enumeration_mode
         self.is_running = False
         
         # 获取网络接口信息
@@ -113,7 +115,8 @@ class StarResonanceMonitor:
                     category=self.category, 
                     attributes=self.attributes, 
                     exclude_attributes=self.exclude_attributes,
-                    match_count=self.match_count
+                    match_count=self.match_count,
+                    enumeration_mode=self.enumeration_mode
                 )
                     
         except Exception as e:
@@ -137,6 +140,8 @@ def main():
                        help='指定要排除的属性词条 (例如: 特攻治疗加持 专精治疗加持)')
     parser.add_argument('--match-count', '-mc', type=int, default=1,
                        help='模组需要包含的指定词条数量 (默认: 1)')
+    parser.add_argument('--enumeration-mode', '-enum', action='store_true',
+                       help='启用枚举模式, 直接使用枚举运算')
 
     
     args = parser.parse_args()
@@ -202,7 +207,8 @@ def main():
         category=args.category,
         attributes=args.attributes,
         exclude_attributes=args.exclude_attributes,
-        match_count=args.match_count
+        match_count=args.match_count,
+        enumeration_mode=args.enumeration_mode 
     )
     
     try:

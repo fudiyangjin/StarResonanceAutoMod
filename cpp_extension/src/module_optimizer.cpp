@@ -180,7 +180,9 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     // 计算组合
     size_t n = candidate_modules.size();
     size_t total_combinations = (n * (n - 1) * (n - 2) * (n - 3)) / 24;
-    int batch_size = std::max(1000, static_cast<int>(total_combinations) / (max_workers * 4));
+    size_t batch_size = std::max(static_cast<size_t>(1000), total_combinations / (max_workers * 4));
+    // 控制内存, 避免枚举模式下爆内存
+    batch_size = std::min(batch_size, static_cast<size_t>(653536));
     size_t num_batches = (total_combinations + batch_size - 1) / batch_size;
     // 创建线程池
     auto pool = std::make_unique<SimpleThreadPool>(max_workers);
