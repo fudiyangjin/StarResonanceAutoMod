@@ -13,7 +13,7 @@ from logging_config import get_logger
 from module_types import (
     ModuleInfo, ModuleType, ModulePart, ModuleAttrType, ModuleCategory,
     MODULE_CATEGORY_MAP, ATTR_THRESHOLDS, BASIC_ATTR_POWER_MAP, SPECIAL_ATTR_POWER_MAP,
-    TOTAL_ATTR_POWER_MAP, BASIC_ATTR_IDS, SPECIAL_ATTR_IDS, ATTR_NAME_TYPE_MAP
+    TOTAL_ATTR_POWER_MAP, BASIC_ATTR_IDS, SPECIAL_ATTR_IDS, ATTR_NAME_TYPE_MAP, MODULE_ATTR_IDS
 )
 from cpp_extension.module_optimizer_cpp import (
     ModulePart as CppModulePart,
@@ -97,6 +97,13 @@ class ModuleOptimizer:
                     f.write(message + '\n')
         except Exception as e:
             self.logger.warning(f"记录筛选结果失败: {e}")
+
+    def get_cpu_count(self) -> int:
+        """获取CPU核心数"""
+        try:
+            return mp.cpu_count()
+        except (NotImplementedError, OSError, RuntimeError):
+            return 8
     
     def get_module_category(self, module: ModuleInfo) -> ModuleCategory:
         """获取模组类型分类
@@ -346,15 +353,21 @@ class ModuleOptimizer:
             List[ModuleSolution]: 最优解列表
         """
  
-        # 为枚举策略专门筛选enumeration_num个属性分布平均的优质模组
-        candidate_modules = self._prefilter_for_enumeration(modules)
+        # # 为枚举策略专门筛选enumeration_num个属性分布平均的优质模组
+        # candidate_modules = self._prefilter_for_enumeration(modules)
+        
+        candidate_modules = modules[:200]
         
         cpp_modules = self._convert_to_cpp_modules(candidate_modules)
         
         # 将目标属性列表转换为集合
-        target_attrs_set = set(self.target_attributes) if self.target_attributes else set()
+        target_attributes_id = []
+        if self.target_attributes:
+            for attr_str in self.target_attributes:
+                target_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+        target_attrs_set = set(target_attributes_id)
         cpp_solutions = strategy_enumeration_cpp(
-            cpp_modules, target_attrs_set, self.max_solutions, self.max_workers)
+            cpp_modules, target_attrs_set, self.max_solutions, self.get_cpu_count())
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
 
@@ -373,7 +386,11 @@ class ModuleOptimizer:
         cpp_modules = self._convert_to_cpp_modules(modules)
         
         # 将目标属性列表转换为集合
-        target_attrs_set = set(self.target_attributes) if self.target_attributes else set()
+        target_attributes_id = []
+        if self.target_attributes:
+            for attr_str in self.target_attributes:
+                target_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+        target_attrs_set = set(target_attributes_id)
         cpp_solutions = optimize_modules_cpp(
             cpp_modules, target_attrs_set, self.max_solutions, self.max_attempts, self.local_search_iterations)
         

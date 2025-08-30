@@ -12,8 +12,7 @@ size_t CombinationCount(size_t n, size_t r) {
     return result;
 }
 
-std::vector<size_t> GetCombinationByIndex(size_t n, size_t r, size_t index) {
-    std::vector<size_t> combination(r);
+void GetCombinationByIndex(size_t n, size_t r, size_t index, std::vector<size_t>& combination) {
     size_t remaining = index;
     
     for (size_t i = 0; i < r; ++i) {
@@ -27,22 +26,24 @@ std::vector<size_t> GetCombinationByIndex(size_t n, size_t r, size_t index) {
             remaining -= combinations_after;
         }
     }
-    return combination;
 }
 
 std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     size_t start_combination, size_t end_combination, size_t n,
     const std::vector<ModuleInfo>& modules,
-    const std::unordered_set<std::string>& target_attributes) {
+    const std::unordered_set<int>& target_attributes) {
     
     size_t range_size = end_combination - start_combination;
     std::vector<LightweightSolution> solutions;
     solutions.reserve(range_size);
     
+    thread_local std::vector<size_t> combination_buffer;
+    combination_buffer.resize(4);
+    
     for (size_t i = start_combination; i < end_combination; ++i) {
-        auto combination = GetCombinationByIndex(n, 4, i);
-        int total_power = CalculateCombatPowerByIndices(combination, modules, target_attributes);
-        solutions.emplace_back(combination, total_power);
+        GetCombinationByIndex(n, 4, i, combination_buffer);
+        int total_power = CalculateCombatPowerByIndices(combination_buffer, modules, target_attributes);
+        solutions.emplace_back(combination_buffer, total_power);
     }
     
     return solutions;
@@ -50,114 +51,112 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
 
 std::pair<int, std::map<std::string, int>> ModuleOptimizerCpp::CalculateCombatPower(
     const std::vector<ModuleInfo>& modules) {
-    
-    std::unordered_map<std::string, int> attr_breakdown;
-    attr_breakdown.reserve(20);
-    
-    for (const auto& module : modules) {
-        for (const auto& part : module.parts) {
-            attr_breakdown[part.name] += part.value;
-        }
-    }
-    
-    int threshold_power = 0;
-    int total_attr_value = 0;
-    
-    for (const auto& [attr_name, attr_value] : attr_breakdown) {
-        total_attr_value += attr_value;
+        std::unordered_map<std::string, int> attr_breakdown;
+        attr_breakdown.reserve(20);
         
-        int max_level = 0;
-        for (size_t i = 0; i < Constants::ATTR_THRESHOLDS.size(); ++i) {
-            if (attr_value >= Constants::ATTR_THRESHOLDS[i]) {
-                max_level = static_cast<int>(i) + 1;
-            } else {
-                break;
+        for (const auto& module : modules) {
+            for (const auto& part : module.parts) {
+                attr_breakdown[part.name] += part.value;
             }
         }
         
-        if (max_level > 0) {
-            auto it = Constants::ATTR_NAME_TYPE_VALUES.find(attr_name);
-            std::string attr_type = (it != Constants::ATTR_NAME_TYPE_VALUES.end()) ? it->second : "basic";
+        int threshold_power = 0;
+        int total_attr_value = 0;
+        
+        for (const auto& [attr_name, attr_value] : attr_breakdown) {
+            total_attr_value += attr_value;
             
-            if (attr_type == "special") {
-                auto power_it = Constants::SPECIAL_ATTR_POWER_VALUES.find(max_level);
-                if (power_it != Constants::SPECIAL_ATTR_POWER_VALUES.end()) {
-                    threshold_power += power_it->second;
-                }
-            } else {
-                auto power_it = Constants::BASIC_ATTR_POWER_VALUES.find(max_level);
-                if (power_it != Constants::BASIC_ATTR_POWER_VALUES.end()) {
-                    threshold_power += power_it->second;
+            int max_level = 0;
+            for (int level = 0; level < 6; ++level) {
+                if (attr_value >= Constants::ATTR_THRESHOLDS[level]) {
+                    max_level = level + 1;
+                } else {
+                    break;
                 }
             }
+            
+            if (max_level > 0) {
+                bool is_special = Constants::SPECIAL_ATTR_NAMES_STR.find(attr_name) != Constants::SPECIAL_ATTR_NAMES_STR.end();
+                
+                int base_power;
+                if (is_special) {
+                    base_power = Constants::SPECIAL_ATTR_POWER_VALUES[max_level - 1];
+                } else {
+                    base_power = Constants::BASIC_ATTR_POWER_VALUES[max_level - 1];
+                }
+                threshold_power += base_power;
+            }
         }
-    }
-    
-    int total_attr_power = 0;
-    auto total_power_it = Constants::TOTAL_ATTR_POWER_VALUES.find(total_attr_value);
-    if (total_power_it != Constants::TOTAL_ATTR_POWER_VALUES.end()) {
-        total_attr_power = total_power_it->second;
-    }
-    
-    int total_power = threshold_power + total_attr_power;
-    
-    std::map<std::string, int> result_map;
-    for (const auto& [key, value] : attr_breakdown) {
-        result_map.emplace(key, value);
-    }
-    
-    return {total_power, result_map};
+        
+        int total_attr_power = total_attr_power = Constants::TOTAL_ATTR_POWER_VALUES[total_attr_value];
+        
+        int total_power = threshold_power + total_attr_power;
+        
+        std::map<std::string, int> result_map;
+        for (const auto& [key, value] : attr_breakdown) {
+            result_map.emplace(key, value);
+        }
+        
+        return {total_power, result_map};
 }
 
 int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
     const std::vector<size_t>& indices,
     const std::vector<ModuleInfo>& modules,
-    const std::unordered_set<std::string>& target_attributes) {
+    const std::unordered_set<int>& target_attributes) {
+
+    std::array<int, 20> attr_values = {};
+    std::array<int, 20> attr_ids;
+    size_t attr_count = 0;
     
-    std::unordered_map<std::string, int> attr_breakdown;
-    attr_breakdown.reserve(20);
+    int total_attr_value = 0;
     
     for (size_t index : indices) {
         const auto& module = modules[index];
         for (const auto& part : module.parts) {
-            attr_breakdown[part.name] += part.value;
+            size_t i;
+            for (i = 0; i < attr_count; ++i) {
+                if (attr_ids[i] == part.id) {
+                    attr_values[i] += part.value;
+                    break;
+                }
+            }
+            if (i == attr_count) {
+                attr_ids[attr_count] = part.id;
+                attr_values[attr_count] = part.value;
+                ++attr_count;
+            }
+            total_attr_value += part.value;
         }
     }
     
     int threshold_power = 0;
-    int total_attr_value = 0;
     
-    for (const auto& [attr_name, attr_value] : attr_breakdown) {
-        total_attr_value += attr_value;
+    for (size_t i = 0; i < attr_count; ++i) {
+        int attr_value = attr_values[i];
+        int attr_id = attr_ids[i];
         
         int max_level = 0;
-        for (size_t i = 0; i < Constants::ATTR_THRESHOLDS.size(); ++i) {
-            if (attr_value >= Constants::ATTR_THRESHOLDS[i]) {
-                max_level = static_cast<int>(i) + 1;
+        for (int level = 0; level < 6; ++level) {
+            if (attr_value >= Constants::ATTR_THRESHOLDS[level]) {
+                max_level = level + 1;
             } else {
                 break;
             }
         }
         
         if (max_level > 0) {
-            auto it = Constants::ATTR_NAME_TYPE_VALUES.find(attr_name);
-            std::string attr_type = (it != Constants::ATTR_NAME_TYPE_VALUES.end()) ? it->second : "basic";
+            bool is_special = Constants::SPECIAL_ATTR_NAMES.find(attr_id) != Constants::SPECIAL_ATTR_NAMES.end();
             
-            int base_power = 0;
-            if (attr_type == "special") {
-                auto power_it = Constants::SPECIAL_ATTR_POWER_VALUES.find(max_level);
-                if (power_it != Constants::SPECIAL_ATTR_POWER_VALUES.end()) {
-                    base_power = power_it->second;
-                }
+            int base_power;
+            if (is_special) {
+                base_power = Constants::SPECIAL_ATTR_POWER_VALUES[max_level - 1];
             } else {
-                auto power_it = Constants::BASIC_ATTR_POWER_VALUES.find(max_level);
-                if (power_it != Constants::BASIC_ATTR_POWER_VALUES.end()) {
-                    base_power = power_it->second;
-                }
+                base_power = Constants::BASIC_ATTR_POWER_VALUES[max_level - 1];
             }
             
             // 是否为-attr携带的属性, 如果是就双倍
-            if (!target_attributes.empty() && target_attributes.find(attr_name) != target_attributes.end()) {
+            if (!target_attributes.empty() && target_attributes.find(attr_id) != target_attributes.end()) {
                 threshold_power += base_power * 2;
             } else {
                 threshold_power += base_power;
@@ -165,11 +164,7 @@ int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
         }
     }
     
-    int total_attr_power = 0;
-    auto total_power_it = Constants::TOTAL_ATTR_POWER_VALUES.find(total_attr_value);
-    if (total_power_it != Constants::TOTAL_ATTR_POWER_VALUES.end()) {
-        total_attr_power = total_power_it->second;
-    }
+    int total_attr_power = Constants::TOTAL_ATTR_POWER_VALUES[total_attr_value];
     
     return threshold_power + total_attr_power;
 }
@@ -177,7 +172,7 @@ int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
 
 std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     const std::vector<ModuleInfo>& modules,
-    const std::unordered_set<std::string>& target_attributes,
+    const std::unordered_set<int>& target_attributes,
     int max_solutions,
     int max_workers) {
 
@@ -256,7 +251,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
 
 std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(
     const std::vector<ModuleInfo>& modules,
-    const std::unordered_set<std::string>& target_attributes,
+    const std::unordered_set<int>& target_attributes,
     int max_solutions,
     int max_attempts_multiplier,
     int local_search_iterations) {
@@ -313,7 +308,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(
 
 LightweightSolution ModuleOptimizerCpp::GreedyConstructSolutionByIndices(
     const std::vector<ModuleInfo>& modules,
-    const std::unordered_set<std::string>& target_attributes) {
+    const std::unordered_set<int>& target_attributes) {
     
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -380,7 +375,7 @@ LightweightSolution ModuleOptimizerCpp::LocalSearchImproveByIndices(
     const LightweightSolution& solution,
     const std::vector<ModuleInfo>& all_modules,
     int iterations,
-    const std::unordered_set<std::string>& target_attributes) {
+    const std::unordered_set<int>& target_attributes) {
     
     LightweightSolution best_solution = solution;
     

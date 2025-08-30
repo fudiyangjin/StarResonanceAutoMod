@@ -12,54 +12,48 @@
 #include <unordered_set>
 #include <random>
 #include <algorithm>
+#include <array>
 
 #include "simple_thread_pool.h"
 
 /// @brief 游戏模组常量定义
 namespace Constants {
     /// @brief 属性阈值
-    inline const std::vector<int> ATTR_THRESHOLDS = {1, 4, 8, 12, 16, 20};
+    inline const std::array<int, 6> ATTR_THRESHOLDS = {1, 4, 8, 12, 16, 20};
     
     /// @brief 基础属性战斗力映射
-    /// @details 键为属性等级，值为对应的战斗力
-    inline const std::map<int, int> BASIC_ATTR_POWER_VALUES = {
-        {1, 7}, {2, 14}, {3, 29}, {4, 44}, {5, 167}, {6, 254}
-    };
-    
+    /// @details 基础属性对应的战斗力
+    inline const std::array<int, 6> BASIC_ATTR_POWER_VALUES = {7, 14, 29, 44, 167, 254};
+
     /// @brief 特殊属性战斗力映射
-    /// @details 键为属性等级，值为对应的战斗力
-    inline const std::map<int, int> SPECIAL_ATTR_POWER_VALUES = {
-        {1, 14}, {2, 29}, {3, 59}, {4, 89}, {5, 298}, {6, 448}
-    };
+    /// @details 特殊属性对应的战斗力
+    inline const std::array<int, 6> SPECIAL_ATTR_POWER_VALUES = {14, 29, 59, 89, 298, 448};
     
-    /// @brief 属性名称到类型的映射常量
-    /// @details 将属性名称映射到 "basic" 或 "special" 类型
-    inline const std::map<std::string, std::string> ATTR_NAME_TYPE_VALUES = {
-        {"力量加持", "basic"}, {"敏捷加持", "basic"}, {"智力加持", "basic"},
-        {"特攻伤害", "basic"}, {"精英打击", "basic"}, {"特攻治疗加持", "basic"},
-        {"专精治疗加持", "basic"}, {"施法专注", "basic"}, {"攻速专注", "basic"},
-        {"暴击专注", "basic"}, {"幸运专注", "basic"}, {"抵御魔法", "basic"},
-        {"抵御物理", "basic"}, {"极-伤害叠加", "special"}, {"极-灵活身法", "special"},
-        {"极-生命凝聚", "special"}, {"极-急救措施", "special"}, {"极-生命波动", "special"},
-        {"极-生命汲取", "special"}, {"极-全队幸暴", "special"}, {"极-绝境守护", "special"}
+    /// @brief 特殊属性映射
+    /// @details 特殊属性映射, int
+    inline const std::unordered_map<int, bool> SPECIAL_ATTR_NAMES = {
+        {2104, true}, {2105, true}, {2204, true},
+        {2205, true}, {2404, true}, {2405, true},
+        {2406, true}, {2304, true}
+    };
+
+    /// @brief 特殊属性映射
+    /// @details 特殊属性映射, str
+    inline const std::unordered_map<std::string, bool> SPECIAL_ATTR_NAMES_STR = {
+        {"极-伤害叠加", true}, {"极-灵活身法", true}, {"极-生命凝聚", true},
+        {"极-急救措施", true}, {"极-生命波动", true}, {"极-生命汲取", true},
+        {"极-全队幸暴", true}, {"极-绝境守护", true}
     };
     
     /// @brief 总属性战斗力映射表
     /// @details 从0到120的属性总值对应的战斗力映射
-    inline const std::map<int, int> TOTAL_ATTR_POWER_VALUES = {
-        {0, 0}, {1, 5}, {2, 11}, {3, 17}, {4, 23}, {5, 29}, {6, 34}, {7, 40}, {8, 46},
-        {18, 104}, {19, 110}, {20, 116}, {21, 122}, {22, 128}, {23, 133}, {24, 139}, {25, 145},
-        {26, 151}, {27, 157}, {28, 163}, {29, 168}, {30, 174}, {31, 180}, {32, 186}, {33, 192},
-        {34, 198}, {35, 203}, {36, 209}, {37, 215}, {38, 221}, {39, 227}, {40, 233}, {41, 238},
-        {42, 244}, {43, 250}, {44, 256}, {45, 262}, {46, 267}, {47, 273}, {48, 279}, {49, 285},
-        {50, 291}, {51, 297}, {52, 302}, {53, 308}, {54, 314}, {55, 320}, {56, 326}, {57, 332},
-        {58, 337}, {59, 343}, {60, 349}, {61, 355}, {62, 361}, {63, 366}, {64, 372}, {65, 378},
-        {66, 384}, {67, 390}, {68, 396}, {69, 401}, {70, 407}, {71, 413}, {72, 419}, {73, 425},
-        {74, 431}, {75, 436}, {76, 442}, {77, 448}, {78, 454}, {79, 460}, {80, 466}, {81, 471},
-        {82, 477}, {83, 483}, {84, 489}, {85, 495}, {86, 500}, {87, 506}, {88, 512}, {89, 518},
-        {90, 524}, {91, 530}, {92, 535}, {93, 541}, {94, 547}, {95, 553}, {96, 559}, {97, 565},
-        {98, 570}, {99, 576}, {100, 582}, {101, 588}, {102, 594}, {103, 599}, {104, 605}, {105, 611},
-        {106, 617}, {113, 658}, {114, 664}, {115, 669}, {116, 675}, {117, 681}, {118, 687}, {119, 693}, {120, 699}
+    inline const std::array<int, 121> TOTAL_ATTR_POWER_VALUES = {
+        0, 5, 11, 17, 23, 29, 34, 40, 46, 52, 58, 64, 69, 75, 81, 87, 93, 99, 104, 110, 116,
+        122, 128, 133, 139, 145, 151, 157, 163, 168, 174, 180, 186, 192, 198, 203, 209, 215, 221, 227, 233,
+        238, 244, 250, 256, 262, 267, 273, 279, 285, 291, 297, 302, 308, 314, 320, 326, 332, 337, 343, 349,
+        355, 361, 366, 372, 378, 384, 390, 396, 401, 407, 413, 419, 425, 431, 436, 442, 448, 454, 460, 466,
+        471, 477, 483, 489, 495, 500, 506, 512, 518, 524, 530, 535, 541, 547, 553, 559, 565, 570, 576, 582,
+        588, 594, 599, 605, 611, 617, 623, 629, 634, 640, 646, 652, 658, 664, 669, 675, 681, 687, 693, 699
     };
 }
 
@@ -69,12 +63,12 @@ namespace Constants {
 /// @return 组合数
 size_t CombinationCount(size_t n, size_t r);
 
-/// @brief 根据索引直接计算第k个组合
+/// @brief 根据索引直接计算第k个组合（填充到输出参数）
 /// @param n 总元素数量
 /// @param r 选择元素数量
 /// @param index 组合索引
-/// @return 第index个组合的索引数组
-std::vector<size_t> GetCombinationByIndex(size_t n, size_t r, size_t index);
+/// @param combination 输出参数，用于存储组合结果
+void GetCombinationByIndex(size_t n, size_t r, size_t index, std::vector<size_t>& combination);
 
 /// @brief 模组属性数据结构
 /// @details 表示单个模组属性的信息
@@ -193,7 +187,7 @@ public:
     static int CalculateCombatPowerByIndices(
         const std::vector<size_t>& indices,
         const std::vector<ModuleInfo>& modules,
-        const std::unordered_set<std::string>& target_attributes = {});
+        const std::unordered_set<int>& target_attributes = {});
 
     /// @brief 处理组合范围
     /// @param start_combination 起始组合编号
@@ -207,7 +201,7 @@ public:
         size_t end_combination, 
         size_t n,
         const std::vector<ModuleInfo>& modules,
-        const std::unordered_set<std::string>& target_attributes = {}
+        const std::unordered_set<int>& target_attributes = {}
     );
 
     /// @brief 策略枚举算法
@@ -218,7 +212,7 @@ public:
     /// @return 返回模组解决方案列表
     static std::vector<ModuleSolution> StrategyEnumeration(
         const std::vector<ModuleInfo>& modules,
-        const std::unordered_set<std::string>& target_attributes = {},
+        const std::unordered_set<int>& target_attributes = {},
         int max_solutions = 60,
         int max_workers = 8);
 
@@ -231,7 +225,7 @@ public:
     /// @return 返回最优的模组解决方案列表
     static std::vector<ModuleSolution> OptimizeModules(
         const std::vector<ModuleInfo>& modules,
-        const std::unordered_set<std::string>& target_attributes = {},
+        const std::unordered_set<int>& target_attributes = {},
         int max_solutions = 60,
         int max_attempts_multiplier = 20,
         int local_search_iterations = 30);
@@ -243,7 +237,7 @@ private:
     /// @return 返回简易解
     static LightweightSolution GreedyConstructSolutionByIndices(
         const std::vector<ModuleInfo>& modules,
-        const std::unordered_set<std::string>& target_attributes = {});
+        const std::unordered_set<int>& target_attributes = {});
     
     /// @brief 局部搜索改进算法
     /// @param solution 初始解决方案
@@ -255,7 +249,7 @@ private:
         const LightweightSolution& solution,
         const std::vector<ModuleInfo>& all_modules,
         int iterations = 10,
-        const std::unordered_set<std::string>& target_attributes = {});
+        const std::unordered_set<int>& target_attributes = {});
     
     /// @brief 检查组合是否唯一
     /// @param indices 当前组合索引

@@ -91,6 +91,9 @@ MODULE_ATTR_NAMES = {
     ModuleAttrType.EXTREME_DESPERATE_GUARDIAN.value: "极-绝境守护",
 }
 
+# 模组属性id名称映射
+MODULE_ATTR_IDS = {name: attr_id for attr_id, name in MODULE_ATTR_NAMES.items()}
+
 # 模组类型到分类的映射
 MODULE_CATEGORY_MAP = {
     ModuleType.BASIC_ATTACK.value: ModuleCategory.ATTACK,
