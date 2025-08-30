@@ -132,9 +132,8 @@ class ModuleOptimizer:
                 - candidate_modules: 第二轮筛选出的候选模组, 基于各属性值分布
         """
         # 基于总属性值
-        top_modules = self._prefilter_modules_by_total_scores(module, self.enumeration_num)
+        top_modules = self._prefilter_modules_by_total_scores(modules, self.enumeration_num)
         
-        # 取每种属性的前30个模组
         attr_modules = {}
         for module in modules:
             for part in module.parts:
@@ -149,15 +148,18 @@ class ModuleOptimizer:
                         attr_modules[attr_name] = []
                     attr_modules[attr_name].append((module, part.value))
         
-        candidate_modules = set()
+        attr_count = len(attr_modules.keys())
+        single_attr_num = 90 if attr_count <= 5 else 30
+
+        candidate_modules = top_modules.copy()
         for attr_name, module_values in attr_modules.items():
             sorted_by_attr = sorted(module_values, key=lambda x: x[1], reverse=True)
-            top_attr_modules = [item[0] for item in sorted_by_attr[:30]]
-            candidate_modules.update(top_attr_modules)
+            top_attr_modules = [item[0] for item in sorted_by_attr[:single_attr_num]]
+            candidate_modules.extend(top_attr_modules)
         
-        candidate_modules = list(candidate_modules)
+        candidate_modules = list(set(candidate_modules))
         
-        self.logger.info(f"筛选后模组数量: {len(candidate_modules)}")
+        self.logger.info(f"筛选后模组数量: candidate_modules={len(candidate_modules)} top_modules={len(top_modules)}")
         self.logger.info(f"涉及的属性类型: {list(attr_modules.keys())}")
         return top_modules, candidate_modules
     
