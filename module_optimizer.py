@@ -24,8 +24,15 @@ from cpp_extension.module_optimizer_cpp import (
     optimize_modules_cpp
 )
 
-# 获取日志器
-logger = get_logger(__name__)
+# 多进程保护, 延迟初始化日志器
+logger = None
+
+def _get_logger():
+    """延迟获取日志器"""
+    global logger
+    if logger is None:
+        logger = get_logger(__name__)
+    return logger
 
 
 @dataclass
@@ -52,7 +59,7 @@ class ModuleOptimizer:
             target_attributes: 目标属性列表，用于优先筛选
             exclude_attributes: 排除属性列表, 用于权重为0
         """
-        self.logger = logger
+        self.logger = _get_logger()
         self._result_log_file = None
         self.target_attributes = target_attributes or []
         self.exclude_attributes = exclude_attributes or []
@@ -226,8 +233,9 @@ class ModuleOptimizer:
             self.logger.info("并行策略开始")
             num_processes = min(2, mp.cpu_count())
 
-            # 创建进程池
-            with mp.Pool(processes=num_processes) as pool:
+            # 创建进程池, spawn兼容打包环境
+            ctx = mp.get_context('spawn')
+            with ctx.Pool(processes=num_processes) as pool:
                 # 贪心策略
                 greedy_future = pool.apply_async(self._strategy_greedy_local_search, (candidate_modules,))
                 # 枚举策略

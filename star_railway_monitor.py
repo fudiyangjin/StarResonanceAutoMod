@@ -8,6 +8,7 @@ import time
 import threading
 import argparse
 import os
+import multiprocessing as mp
 from typing import Dict, List, Optional, Any
 from logging_config import setup_logging, get_logger
 from module_parser import ModuleParser
@@ -15,8 +16,11 @@ from module_types import ModuleInfo
 from packet_capture import PacketCapture
 from network_interface_util import get_network_interfaces, select_network_interface
 
+# 多进程保护
+_is_main_process = mp.current_process().name == 'MainProcess'
+
 # 获取日志器
-logger = get_logger(__name__)
+logger = get_logger(__name__) if _is_main_process else None
 
 
 class StarResonanceMonitor:
@@ -127,6 +131,7 @@ class StarResonanceMonitor:
 
 def main():
     """主函数"""
+    
     parser = argparse.ArgumentParser(description='星痕共鸣模组筛选器')
     parser.add_argument('--interface', '-i', type=int, help='网络接口索引')
     parser.add_argument('--debug', '-d', action='store_true', help='启用调试模式')
@@ -143,7 +148,6 @@ def main():
     parser.add_argument('--enumeration-mode', '-enum', action='store_true',
                        help='启用枚举模式, 直接使用枚举运算')
 
-    
     args = parser.parse_args()
     
     # 设置日志系统
@@ -229,4 +233,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # 多进程打包支持
+    mp.freeze_support()
     main() 
