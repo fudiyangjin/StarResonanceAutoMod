@@ -239,6 +239,10 @@ StarResonanceAutoMod/
 - 提交 Issue：[GitHub Issues](https://github.com/fudiyangjin/StarResonanceAutoMod/issues)
 - 查看日志文件：`logs/` 目录下的最新日志
 
+## 🙏 鸣谢
+
+本项目关键数据抓取与分析部分基于 [StarResonanceDamageCounter](https://github.com/dmlgzs/StarResonanceDamageCounter) 项目移植而来，感谢原作者对于本项目的帮助。
+
 ## ⚖️ 免责声明
 
 本工具仅用于游戏数据分析学习目的，不得用于任何违反游戏服务条款的行为。使用者需自行承担相关风险。项目开发者不对任何使用本工具产生的后果负责。请在使用前确保遵守游戏社区的相关规定和道德标准。
