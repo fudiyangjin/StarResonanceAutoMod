@@ -1,4 +1,7 @@
 scapy>=2.5.0
 zstandard>=0.21.0
 protobuf>=4.21.0
-pyinstaller>=5.0.0 
+psutil>=5.9.0
+pybind11>=2.10.0
+setuptools>=65.0.0
+wheel>=0.38.0
