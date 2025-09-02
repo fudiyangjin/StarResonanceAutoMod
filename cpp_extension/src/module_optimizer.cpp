@@ -44,15 +44,13 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     
     for (size_t i = start_combination; i < end_combination; ++i) {
         GetCombinationByIndex(n, 4, i, combination_buffer);
-        // ====== 新增：先按 -mas 硬性约束筛掉不合格组合 ======
+        // 先按 -mas 硬性约束筛掉不合格组合
         if (!min_attr_sum_requirements.empty()) {
             bool ok = true;
-            // 对每个被约束的属性，计算该4件组合的总和
             for (const auto& kv : min_attr_sum_requirements) {
                 int attr_id = kv.first;
                 int need_sum = kv.second;
                 int got_sum = 0;
-                // 遍历4件套中的所有词条
                 for (size_t idx : combination_buffer) {
                     const auto& parts = modules[idx].parts;
                     for (const auto& p : parts) {

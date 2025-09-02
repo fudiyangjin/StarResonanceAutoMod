@@ -357,7 +357,6 @@ class ModuleOptimizer:
                 exclude_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
         exclude_attrs_set = set(exclude_attributes_id)
         
-        # 新增：把 -mas （中文名 -> 最小和）转换为 （属性ID -> 最小和），下沉到 C++ 硬过滤
         min_attr_id_requirements: Dict[int, int] = {}
         if self.min_attr_sum_requirements:
             for name, val in self.min_attr_sum_requirements.items():
@@ -369,7 +368,7 @@ class ModuleOptimizer:
             cpp_modules,
             target_attrs_set,
             exclude_attrs_set,
-            min_attr_id_requirements,     # 👈 传入 C++ 的硬约束
+            min_attr_id_requirements,    
             self.max_solutions,
             self.get_cpu_count()
         )
