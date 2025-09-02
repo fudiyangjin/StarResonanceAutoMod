@@ -27,7 +27,8 @@ class StarResonanceMonitor:
     """星痕共鸣监控器"""
     
     def __init__(self, interface_index: int = None, category: str = "全部", attributes: List[str] = None, 
-                 exclude_attributes: List[str] = None, match_count: int = 1, enumeration_mode: bool = False):
+                 exclude_attributes: List[str] = None, match_count: int = 1, enumeration_mode: bool = False,
+                 min_attr_sum: dict | None = None):
         """
         初始化监控器
         
@@ -38,12 +39,14 @@ class StarResonanceMonitor:
             exclude_attributes: 要排除的属性词条列表
             match_count: 模组需要包含的指定词条数量
             enumeration_mode: 是否启用枚举模式
+            min_attr_sum: 强制某属性在4件套总和≥VALUE的字典
         """
         self.interface_index = interface_index
         self.category = category
         self.attributes = attributes or []
         self.exclude_attributes = exclude_attributes or []
         self.match_count = match_count
+        self.min_attr_sum = min_attr_sum or {}
         self.enumeration_mode = enumeration_mode
         self.is_running = False
         
@@ -120,7 +123,8 @@ class StarResonanceMonitor:
                     attributes=self.attributes, 
                     exclude_attributes=self.exclude_attributes,
                     match_count=self.match_count,
-                    enumeration_mode=self.enumeration_mode
+                    enumeration_mode=self.enumeration_mode,
+                    min_attr_sum=self.min_attr_sum
                 )
                     
         except Exception as e:
@@ -145,10 +149,19 @@ def main():
                        help='指定要排除的属性词条 (例如: 特攻治疗加持 专精治疗加持)')
     parser.add_argument('--match-count', '-mc', type=int, default=1,
                        help='模组需要包含的指定词条数量 (默认: 1)')
+    parser.add_argument('--min-attr-sum', '-mas', nargs=2, action='append', metavar=('ATTR','VALUE'),
+                       help='强制某属性在4件套总和≥VALUE。可多次使用，如：-mas 暴击专注 8 -mas 智力加持 12')
     parser.add_argument('--enumeration-mode', '-enum', action='store_true',
                        help='启用枚举模式, 直接使用枚举运算')
 
     args = parser.parse_args()
+    min_attr_sum = {}
+    if args.min_attr_sum:
+        for name, val in args.min_attr_sum:
+            try:
+                min_attr_sum[name] = int(val)
+            except Exception:
+                print(f"[WARN] 无效的 -mas 阈值：{name} {val}（应为整数）")
     
     # 设置日志系统
     setup_logging(debug_mode=args.debug)
@@ -212,7 +225,8 @@ def main():
         attributes=args.attributes,
         exclude_attributes=args.exclude_attributes,
         match_count=args.match_count,
-        enumeration_mode=args.enumeration_mode 
+        enumeration_mode=args.enumeration_mode,
+        min_attr_sum=min_attr_sum 
     )
     
     try:

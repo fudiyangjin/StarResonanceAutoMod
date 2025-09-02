@@ -47,6 +47,7 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
           py::arg("modules"),
           py::arg("target_attributes") = std::unordered_set<int>{},
           py::arg("exclude_attributes") = std::unordered_set<int>{},
+          py::arg("min_attr_sum_requirements") = std::unordered_map<int,int>{},
           py::arg("max_solutions") = 60,
           py::arg("max_workers") = 8);
     
