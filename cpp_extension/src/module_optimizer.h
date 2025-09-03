@@ -10,6 +10,7 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 #include <random>
 #include <algorithm>
 #include <array>
@@ -206,7 +207,8 @@ public:
         size_t n,
         const std::vector<ModuleInfo>& modules,
         const std::unordered_set<int>& target_attributes = {},
-        const std::unordered_set<int>& exclude_attributes = {}
+        const std::unordered_set<int>& exclude_attributes = {},
+        const std::unordered_map<int, int>& min_attr_sum_requirements = {}
     );
 
     /// @brief 策略枚举算法
@@ -220,6 +222,7 @@ public:
         const std::vector<ModuleInfo>& modules,
         const std::unordered_set<int>& target_attributes = {},
         const std::unordered_set<int>& exclude_attributes = {},
+        const std::unordered_map<int, int>& min_attr_sum_requirements = {},
         int max_solutions = 60,
         int max_workers = 8);
 

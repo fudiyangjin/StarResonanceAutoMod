@@ -32,7 +32,8 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     size_t start_combination, size_t end_combination, size_t n,
     const std::vector<ModuleInfo>& modules,
     const std::unordered_set<int>& target_attributes,
-    const std::unordered_set<int>& exclude_attributes) {
+    const std::unordered_set<int>& exclude_attributes,
+    const std::unordered_map<int, int>& min_attr_sum_requirements) {
     
     size_t range_size = end_combination - start_combination;
     std::vector<LightweightSolution> solutions;
@@ -43,6 +44,23 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     
     for (size_t i = start_combination; i < end_combination; ++i) {
         GetCombinationByIndex(n, 4, i, combination_buffer);
+        // 先按 -mas 硬性约束筛掉不合格组合
+        if (!min_attr_sum_requirements.empty()) {
+            bool ok = true;
+            for (const auto& kv : min_attr_sum_requirements) {
+                int attr_id = kv.first;
+                int need_sum = kv.second;
+                int got_sum = 0;
+                for (size_t idx : combination_buffer) {
+                    const auto& parts = modules[idx].parts;
+                    for (const auto& p : parts) {
+                        if (p.id == attr_id) got_sum += p.value;
+                    }
+                }
+                if (got_sum < need_sum) { ok = false; break; }
+            }
+            if (!ok) continue;
+        }
         int total_power = CalculateCombatPowerByIndices(combination_buffer, modules, target_attributes, exclude_attributes);
         solutions.emplace_back(combination_buffer, total_power);
     }
@@ -179,6 +197,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     const std::vector<ModuleInfo>& modules,
     const std::unordered_set<int>& target_attributes,
     const std::unordered_set<int>& exclude_attributes,
+    const std::unordered_map<int, int>& min_attr_sum_requirements,
     int max_solutions,
     int max_workers) {
 
@@ -199,10 +218,15 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     for (size_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
         size_t start_combination = batch_idx * batch_size;
         size_t end_combination = std::min(start_combination + batch_size, total_combinations);
-        
-        futures.push_back(pool->enqueue([start_combination, end_combination, n, &candidate_modules, target_attributes, exclude_attributes]() { 
-            return ProcessCombinationRange(start_combination, end_combination, n, candidate_modules, target_attributes, exclude_attributes);
-        }));
+        auto min_req_copy = min_attr_sum_requirements;
+        futures.push_back(pool->enqueue(
+            [start_combination, end_combination, n,
+             &candidate_modules, target_attributes, exclude_attributes, min_req_copy]() {
+                return ProcessCombinationRange(
+                    start_combination, end_combination, n,
+                    candidate_modules, target_attributes, exclude_attributes, min_req_copy);
+            }
+        ));
     }
     
     // 优先队列收集解保持真正占内存的只有最后的解+运行中线程创建的LightweightSolution

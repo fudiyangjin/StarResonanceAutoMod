@@ -52,7 +52,7 @@ class ModuleSolution:
 class ModuleOptimizer:
     """模组搭配优化器"""
     
-    def __init__(self, target_attributes: List[str] = None, exclude_attributes: List[str] = None):
+    def __init__(self, target_attributes: List[str] = None, exclude_attributes: List[str] = None, min_attr_sum_requirements: dict | None = None):
         """初始化模组搭配优化器
         
         Args:
@@ -63,6 +63,7 @@ class ModuleOptimizer:
         self._result_log_file = None
         self.target_attributes = target_attributes or []
         self.exclude_attributes = exclude_attributes or []
+        self.min_attr_sum_requirements = min_attr_sum_requirements or {}
         
         self.local_search_iterations = 50  # 局部搜索迭代次数
         self.max_attempts = 20             # 贪心+局部搜索最大尝试次数
@@ -249,18 +250,37 @@ class ModuleOptimizer:
 
         all_solution = greedy_solutions + enum_solutions
         unique_solutions = self._complete_deduplicate(all_solution)
+        unique_solutions = self._filter_by_min_attr(unique_solutions)
         unique_solutions.sort(key=lambda x: x.score, reverse=True)
         # 返回前top_n个解
         result = unique_solutions[:top_n]
         
         # 如果使用了目标属性，在最终返回前恢复原始评分
-        if self.target_attributes:
+        if self.target_attributes or self.min_attr_sum_requirements:
             result = self._restore_original_scores(result)
         
         self.logger.info(f"优化完成，返回{len(result)}个最优解")
         
         return result
     
+    def _filter_by_min_attr(self, solutions: List[ModuleSolution]) -> List[ModuleSolution]:
+        """按硬性总和约束过滤解；约束来自 self.min_attr_sum_requirements（键为中文属性名）"""
+        if not self.min_attr_sum_requirements:
+            return solutions
+        req = self.min_attr_sum_requirements
+        out = []
+        for s in solutions:
+            bd = getattr(s, "attr_breakdown", {}) or {}
+            ok = True
+            for k, v in req.items():
+                if bd.get(k, 0) < v:
+                    ok = False
+                    break
+            if ok:
+                out.append(s)
+        return out
+
+
     def enumerate_modules(self, modules: List[ModuleInfo], category: ModuleCategory, top_n: int = 40) -> List[ModuleSolution]:
         """只进行枚举运算
         
@@ -296,6 +316,7 @@ class ModuleOptimizer:
         
         enum_solutions = self._strategy_enumeration(filtered_modules)
         unique_solutions = self._complete_deduplicate(enum_solutions)
+        unique_solutions = self._filter_by_min_attr(unique_solutions)
         unique_solutions.sort(key=lambda x: x.score, reverse=True)
         # 返回前top_n个解
         result = unique_solutions[:top_n]
@@ -324,7 +345,9 @@ class ModuleOptimizer:
         target_attributes_id = []
         if self.target_attributes:
             for attr_str in self.target_attributes:
-                target_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+                aid = MODULE_ATTR_IDS.get(attr_str)
+                if aid is not None:
+                    target_attributes_id.append(aid)
         target_attrs_set = set(target_attributes_id)
         
         # 将排除属性列表转换为集合
@@ -334,8 +357,21 @@ class ModuleOptimizer:
                 exclude_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
         exclude_attrs_set = set(exclude_attributes_id)
         
+        min_attr_id_requirements: Dict[int, int] = {}
+        if self.min_attr_sum_requirements:
+            for name, val in self.min_attr_sum_requirements.items():
+                aid = MODULE_ATTR_IDS.get(name)
+                if aid is not None:
+                    min_attr_id_requirements[aid] = int(val)
+
         cpp_solutions = strategy_enumeration_cpp(
-            cpp_modules, target_attrs_set, exclude_attrs_set, self.max_solutions, self.get_cpu_count())
+            cpp_modules,
+            target_attrs_set,
+            exclude_attrs_set,
+            min_attr_id_requirements,    
+            self.max_solutions,
+            self.get_cpu_count()
+        )
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
 
@@ -353,18 +389,25 @@ class ModuleOptimizer:
         
         cpp_modules = self._convert_to_cpp_modules(modules)
         
-        # 将目标属性列表转换为集合
-        target_attributes_id = []
-        if self.target_attributes:
-            for attr_str in self.target_attributes:
-                target_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+        boost_attr_names: Set[str] = set(self.target_attributes or [])
+        if self.min_attr_sum_requirements:
+            boost_attr_names.update(self.min_attr_sum_requirements.keys())
+
+        # 将 boost 后的目标属性名 -> id
+        target_attributes_id: List[int] = []
+        for attr_str in boost_attr_names:
+            aid = MODULE_ATTR_IDS.get(attr_str)
+            if aid is not None:
+                target_attributes_id.append(aid)
         target_attrs_set = set(target_attributes_id)
         
         # 将排除属性列表转换为集合
         exclude_attributes_id = []
         if self.exclude_attributes:
             for attr_str in self.exclude_attributes:
-                exclude_attributes_id.append(MODULE_ATTR_IDS.get(attr_str))
+                aid = MODULE_ATTR_IDS.get(attr_str)
+                if aid is not None:
+                    exclude_attributes_id.append(aid)
         exclude_attrs_set = set(exclude_attributes_id)
         
         cpp_solutions = optimize_modules_cpp(
