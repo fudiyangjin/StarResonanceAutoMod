@@ -2,6 +2,7 @@
 网络抓包模块
 """
 
+import io
 import socket
 import struct
 import threading
@@ -215,8 +216,22 @@ class PacketCapture:
                 if data:
                     # 检查游戏服务器签名
                     signature = b'\x00\x63\x33\x53\x42\x00'
-                    if len(data) >= 11 and data[5:11] == signature:
-                        return True
+                    stream = io.BytesIO(data)
+                    while True:
+                        # 读4字节长度
+                        len_buf = stream.read(4)
+                        if len(len_buf) < 4:
+                            break
+                        length = int.from_bytes(len_buf, byteorder="big")
+
+                        # 读实际数据
+                        data1 = stream.read(length - 4)
+                        if not data1:
+                            break
+
+                        # 检查签名
+                        if data1[5:5+len(signature)] == signature:
+                            return True
                         
             if len(payload) == 0x62:
                 # 检查登录返回包特征
