@@ -33,3 +33,4 @@ ENV/
 # IDE specific files
 .idea/
 .vscode/
+cpp_extension/src/module_optimizer_cuda.obj
