@@ -28,7 +28,7 @@ void GetCombinationByIndex(size_t n, size_t r, size_t index, std::vector<size_t>
     }
 }
 
-std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
+std::vector<CompactSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     size_t start_combination, size_t end_combination, size_t n,
     const std::vector<ModuleInfo>& modules,
     const std::unordered_set<int>& target_attributes,
@@ -36,14 +36,18 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     const std::unordered_map<int, int>& min_attr_sum_requirements) {
     
     size_t range_size = end_combination - start_combination;
-    std::vector<LightweightSolution> solutions;
+    std::vector<CompactSolution> solutions;
     solutions.reserve(range_size);
     
-    thread_local std::vector<size_t> combination_buffer;
-    combination_buffer.resize(4);
+    thread_local std::array<uint16_t, 4> combination_buffer;
+    thread_local std::vector<size_t> temp_combination(4);
     
     for (size_t i = start_combination; i < end_combination; ++i) {
-        GetCombinationByIndex(n, 4, i, combination_buffer);
+        GetCombinationByIndex(n, 4, i, temp_combination);
+        
+        for (size_t j = 0; j < 4; ++j) {
+            combination_buffer[j] = static_cast<uint16_t>(temp_combination[j]);
+        }
         // 先按 -mas 硬性约束筛掉不合格组合
         if (!min_attr_sum_requirements.empty()) {
             bool ok = true;
@@ -51,7 +55,7 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
                 int attr_id = kv.first;
                 int need_sum = kv.second;
                 int got_sum = 0;
-                for (size_t idx : combination_buffer) {
+                for (uint16_t idx : combination_buffer) {
                     const auto& parts = modules[idx].parts;
                     for (const auto& p : parts) {
                         if (p.id == attr_id) got_sum += p.value;
@@ -61,8 +65,11 @@ std::vector<LightweightSolution> ModuleOptimizerCpp::ProcessCombinationRange(
             }
             if (!ok) continue;
         }
-        int total_power = CalculateCombatPowerByIndices(combination_buffer, modules, target_attributes, exclude_attributes);
-        solutions.emplace_back(combination_buffer, total_power);
+
+        CompactSolution temp_solution(combination_buffer, 0);
+        int total_power = CalculateCombatPowerByPackedIndices(temp_solution.packed_indices, modules, target_attributes, exclude_attributes);
+        temp_solution.score = total_power;
+        solutions.emplace_back(temp_solution);
     }
     
     return solutions;
@@ -192,6 +199,86 @@ int ModuleOptimizerCpp::CalculateCombatPowerByIndices(
     return threshold_power + total_attr_power;
 }
 
+int ModuleOptimizerCpp::CalculateCombatPowerByPackedIndices(
+    uint64_t packed_indices,
+    const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<int>& target_attributes,
+    const std::unordered_set<int>& exclude_attributes) {
+    
+    // 解包索引
+    std::array<uint16_t, 4> indices;
+    for (size_t i = 0; i < 4; ++i) {
+        indices[i] = static_cast<uint16_t>((packed_indices >> (i * 16)) & 0xFFFF);
+    }
+    
+    std::array<int, 20> attr_values = {};
+    std::array<int, 20> attr_ids;
+    size_t attr_count = 0;
+    
+    int total_attr_value = 0;
+    
+    for (size_t idx_pos = 0; idx_pos < 4; ++idx_pos) {
+        size_t index = static_cast<size_t>(indices[idx_pos]);
+        
+        const auto& module = modules[index];
+        for (const auto& part : module.parts) {
+            size_t i;
+            for (i = 0; i < attr_count; ++i) {
+                if (attr_ids[i] == part.id) {
+                    attr_values[i] += part.value;
+                    break;
+                }
+            }
+            if (i == attr_count && attr_count < 20) {
+                attr_ids[attr_count] = part.id;
+                attr_values[attr_count] = part.value;
+                ++attr_count;
+            }
+            total_attr_value += part.value;
+        }
+    }
+    
+    int threshold_power = 0;
+    
+    for (size_t i = 0; i < attr_count; ++i) {
+        int attr_value = attr_values[i];
+        int attr_id = attr_ids[i];
+        
+        int max_level = 0;
+        for (int level = 0; level < 6; ++level) {
+            if (attr_value >= Constants::ATTR_THRESHOLDS[level]) {
+                max_level = level + 1;
+            } else {
+                break;
+            }
+        }
+        
+        if (max_level > 0) {
+            bool is_special = Constants::SPECIAL_ATTR_NAMES.find(attr_id) != Constants::SPECIAL_ATTR_NAMES.end();
+            
+            int base_power;
+            if (is_special) {
+                base_power = Constants::SPECIAL_ATTR_POWER_VALUES[max_level - 1];
+            } else {
+                base_power = Constants::BASIC_ATTR_POWER_VALUES[max_level - 1];
+            }
+            
+            if (!target_attributes.empty() && target_attributes.find(attr_id) != target_attributes.end()) {
+                // 是否为-attr携带的属性, 如果是就双倍
+                threshold_power += base_power * 2;
+            } else if (!exclude_attributes.empty() && exclude_attributes.find(attr_id) != exclude_attributes.end()) {
+                // 是否为-exattr携带的属性, 如果是就为0
+                threshold_power += 0;
+            } else {
+                threshold_power += base_power;
+            }
+        }
+    }
+    
+    int total_attr_power = Constants::TOTAL_ATTR_POWER_VALUES[total_attr_value];
+    
+    return threshold_power + total_attr_power;
+}
 
 std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     const std::vector<ModuleInfo>& modules,
@@ -211,7 +298,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     size_t num_batches = (total_combinations + batch_size - 1) / batch_size;
     // 创建线程池
     auto pool = std::make_unique<SimpleThreadPool>(max_workers);
-    std::vector<std::future<std::vector<LightweightSolution>>> futures;
+    std::vector<std::future<std::vector<CompactSolution>>> futures;
     futures.reserve(num_batches); 
 
     // 提交任务
@@ -230,8 +317,8 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     }
     
     // 优先队列收集解保持真正占内存的只有最后的解+运行中线程创建的LightweightSolution
-    std::priority_queue<LightweightSolution, std::vector<LightweightSolution>, 
-                       std::greater<LightweightSolution>> top_solutions;
+    std::priority_queue<CompactSolution, std::vector<CompactSolution>, 
+                       std::greater<CompactSolution>> top_solutions;
     while (!futures.empty()) {
         auto completed_future = std::find_if(futures.begin(), futures.end(),
             [](auto& f) { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
@@ -239,7 +326,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
         if (completed_future != futures.end()) {
             auto batch_result = std::move(completed_future->get());
             for (const auto& solution : batch_result) {
-                if (top_solutions.size() < max_solutions) {
+                if (top_solutions.size() < static_cast<size_t>(max_solutions)) {
                     top_solutions.push(solution);
                 } else if (solution.score > top_solutions.top().score) {
                     top_solutions.pop();
@@ -256,7 +343,7 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     
     
     // 优先队列->vector
-    std::vector<LightweightSolution> all_solutions;
+    std::vector<CompactSolution> all_solutions;
     all_solutions.reserve(top_solutions.size());
     
     while (!top_solutions.empty()) {
@@ -269,13 +356,14 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     std::vector<ModuleSolution> final_solutions;
     final_solutions.reserve(all_solutions.size());
     for (const auto& solution : all_solutions) {
-        std::vector<ModuleInfo> modules;
-        modules.reserve(solution.module_indices.size());
-        for (size_t index : solution.module_indices) {
-            modules.push_back(candidate_modules[index]);
+        auto indices = solution.unpack_indices_vector();
+        std::vector<ModuleInfo> solution_modules;
+        solution_modules.reserve(indices.size());
+        for (size_t index : indices) {
+            solution_modules.push_back(candidate_modules[index]);
         }
-        auto result = CalculateCombatPower(modules);
-        final_solutions.emplace_back(modules, solution.score, result.second);
+        auto result = CalculateCombatPower(solution_modules);
+        final_solutions.emplace_back(solution_modules, solution.score, result.second);
     }
 
     return final_solutions;
