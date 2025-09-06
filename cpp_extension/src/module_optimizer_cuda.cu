@@ -268,6 +268,7 @@ __global__ void GpuEnumerationKernel(
 
         if (min_attr_count > 0)
         {
+            bool valid = true;
             for (int req_idx = 0; req_idx < min_attr_count; ++req_idx)
             {
                 int required_attr_id = min_attr_ids[req_idx];
@@ -292,8 +293,13 @@ __global__ void GpuEnumerationKernel(
 
                 if (actual_sum < required_min_value)
                 {
+                    valid = false;
                     break;
                 }
+            }
+            if (!valid)
+            {
+                continue;
             }
         }
 
