@@ -66,12 +66,14 @@ def compile_cuda_code(cuda_home):
         for src_file, obj_file in cuda_files:
             # 支持的架构包括：
             # - sm_60: GTX 1000系列 (GTX 1060, 1070, 1080等)  
+            # - sm_61: GTX 1000系列 (GTX 1050, 1050 Ti等)
             # - sm_70: GTX 1080 Ti, Titan Xp等
             # - sm_75: RTX 2000系列 (RTX 2060, 2070, 2080等)
             # - sm_80: RTX 3000系列 (RTX 3060, 3070, 3080等)
             # - sm_86: RTX 3090, 4090等
-            # - sm_89: RTX 4060, 4070, 4080等
-            cuda_cmd = f'''"{vs_vars}" && nvcc -c {src_file} -o {obj_file} -std=c++17 --compiler-options "/O2,/std:c++17,/EHsc,/wd4819,/MD" --use_fast_math -I"{cuda_home}\\include" -I"{pybind11.get_include()}" -Isrc -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_89,code=sm_89'''
+            # - sm_89: RTX 4000系列 (RTX 4060, 4070, 4080等)
+            # - sm_90: RTX 5000系列 (RTX 5060, 5070, 5080等)
+            cuda_cmd = f'''"{vs_vars}" && nvcc -c {src_file} -o {obj_file} -std=c++17 --compiler-options "/O2,/std:c++17,/EHsc,/wd4819,/MD" --use_fast_math -I"{cuda_home}\\include" -I"{pybind11.get_include()}" -Isrc -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_89,code=sm_89 -gencode=arch=compute_90,code=sm_90'''
             
             print(f"🔧 编译 {src_file} ...")
             print(f"📋 编译命令: {cuda_cmd}")
@@ -103,8 +105,8 @@ use_cuda = cuda_home is not None
 # 编译参数
 is_windows = os.name == 'nt'
 if is_windows:
-    extra_compile_args = ["/O2", "/std:c++17", "/utf-8", "/EHsc", "/bigobj"]
-    extra_link_args = []
+    extra_compile_args = ["/O2", "/std:c++17", "/utf-8", "/EHsc", "/bigobj", "/MD"]
+    extra_link_args = ["/NODEFAULTLIB:LIBCMT"]
 else:
     extra_compile_args = ["-O3", "-march=native", "-std=c++17"]
     extra_link_args = []

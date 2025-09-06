@@ -294,6 +294,21 @@ public:
         int max_solutions = 60,
         int max_workers = 8);
 
+    /// @brief 策略枚举算法, CUDA
+    /// @param modules 模组信息列表
+    /// @param target_attributes 目标属性名称集合
+    /// @param exclude_attributes 排除属性名称集合
+    /// @param max_solutions 最大解决方案数量，默认为60
+    /// @param max_workers 最大工作线程数, GPU忽略, 保持接口统一
+    /// @return 返回模组解决方案列表
+    static std::vector<ModuleSolution> StrategyEnumerationCUDA(
+        const std::vector<ModuleInfo>& modules,
+        const std::unordered_set<int>& target_attributes = {},
+        const std::unordered_set<int>& exclude_attributes = {},
+        const std::unordered_map<int, int>& min_attr_sum_requirements = {},
+        int max_solutions = 60,
+        int max_workers = 8);
+
     /// @brief 优化模组组合
     /// @param modules 模组信息列表
     /// @param target_attributes 目标属性名称集合

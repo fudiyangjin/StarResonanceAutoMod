@@ -1,5 +1,34 @@
 #include "module_optimizer.h"
 
+#ifdef USE_CUDA
+// 外部CUDA函数声明
+extern "C" int TestCuda();
+extern "C" int GpuStrategyEnumeration(
+    // 模组数据
+    const int* module_attr_ids,
+    const int* module_attr_values,
+    const int* module_attr_counts,
+    const int* module_offsets,
+    int module_count,
+    int total_attrs, 
+    
+    // 目标和排除属性
+    const int* target_attrs,
+    int target_count,
+    const int* exclude_attrs,
+    int exclude_count,
+    
+    // 最小属性总和约束
+    const int* min_attr_ids,
+    const int* min_attr_values,
+    int min_attr_count,
+    
+    // 结果
+    int max_solutions,
+    int* result_scores,
+    long long* result_indices);
+#endif
+
 size_t CombinationCount(size_t n, size_t r) {
     if (r > n) return 0;
     if (r == 0 || r == n) return 1;
@@ -367,6 +396,115 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     }
 
     return final_solutions;
+}
+
+std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumerationCUDA(
+    const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<int>& target_attributes,
+    const std::unordered_set<int>& exclude_attributes,
+    const std::unordered_map<int, int>& min_attr_sum_requirements,
+    int max_solutions,
+    int max_workers) {
+    
+#ifdef USE_CUDA
+    // 测试CUDA是否可用
+    if (TestCuda()) {
+        printf("CUDA GPU acceleration enabled - all calculations performed on GPU\n");
+        
+        // 准备模组数据传输到GPU
+        std::vector<int> all_attr_ids;
+        std::vector<int> all_attr_values;
+        std::vector<int> module_attr_counts;
+        std::vector<int> module_offsets;
+        
+        size_t current_offset = 0;
+        for (const auto& module : modules) {
+            module_offsets.push_back(static_cast<int>(current_offset));
+            module_attr_counts.push_back(static_cast<int>(module.parts.size()));
+            
+            for (const auto& part : module.parts) {
+                all_attr_ids.push_back(part.id);
+                all_attr_values.push_back(part.value);
+            }
+            
+            current_offset += module.parts.size();
+        }
+        
+        std::vector<int> target_attrs(target_attributes.begin(), target_attributes.end());
+        std::vector<int> exclude_attrs(exclude_attributes.begin(), exclude_attributes.end());
+     
+        std::vector<int> min_attr_ids;
+        std::vector<int> min_attr_values;
+        for (const auto& kv : min_attr_sum_requirements) {
+            min_attr_ids.push_back(kv.first);
+            min_attr_values.push_back(kv.second);
+        }
+        
+        std::vector<int> gpu_scores(max_solutions);
+        std::vector<long long> gpu_indices(max_solutions);
+    
+        // CUDA运算
+        int gpu_result_count = GpuStrategyEnumeration(
+            // 模组数据
+            all_attr_ids.data(),
+            all_attr_values.data(),
+            module_attr_counts.data(),
+            module_offsets.data(),
+            static_cast<int>(modules.size()),
+            static_cast<int>(all_attr_ids.size()),
+            
+            // 目标和排除属性
+            target_attrs.empty() ? nullptr : target_attrs.data(),
+            static_cast<int>(target_attrs.size()),
+            exclude_attrs.empty() ? nullptr : exclude_attrs.data(),
+            static_cast<int>(exclude_attrs.size()),
+            
+            // 最小属性总和约束
+            min_attr_ids.empty() ? nullptr : min_attr_ids.data(),
+            min_attr_values.empty() ? nullptr : min_attr_values.data(),
+            static_cast<int>(min_attr_ids.size()),
+            
+            // 结果
+            max_solutions,
+            gpu_scores.data(),
+            gpu_indices.data());
+        
+        // 转换GPU结果
+        std::vector<ModuleSolution> final_solutions;
+        final_solutions.reserve(gpu_result_count);
+        
+        for (int i = 0; i < gpu_result_count; ++i) {   
+            // 解包索引
+            long long packed = gpu_indices[i];
+            std::vector<ModuleInfo> solution_modules;
+            solution_modules.reserve(4);
+            
+            for (int j = 0; j < 4; ++j) {
+                size_t module_idx = static_cast<size_t>((packed >> (j * 16)) & 0xFFFF);
+                if (module_idx < modules.size()) {
+                    solution_modules.push_back(modules[module_idx]);
+                }
+            }
+            
+            std::vector<size_t> solution_indices;
+            for (int j = 0; j < 4; ++j) {
+                size_t module_idx = static_cast<size_t>((packed >> (j * 16)) & 0xFFFF);
+                solution_indices.push_back(module_idx);
+            }
+            
+            auto result = CalculateCombatPower(solution_modules);
+            final_solutions.emplace_back(solution_modules, gpu_scores[i], result.second);
+        }
+        
+        return final_solutions;
+        
+    } else {
+        printf("CUDA not available, using CPU optimized version\n");
+        return StrategyEnumeration(modules, target_attributes, exclude_attributes, min_attr_sum_requirements, max_solutions, max_workers);
+    }
+#else
+    return StrategyEnumeration(modules, target_attributes, exclude_attributes, min_attr_sum_requirements, max_solutions, max_workers);
+#endif
 }
 
 std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(

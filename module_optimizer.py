@@ -21,6 +21,8 @@ from cpp_extension.module_optimizer_cpp import (
     ModuleInfo as CppModuleInfo,
     ModuleSolution as CppModuleSolution,
     strategy_enumeration_cpp,
+    strategy_enumeration_cuda_cpp,
+    test_cuda,
     optimize_modules_cpp
 )
 
@@ -116,6 +118,17 @@ class ModuleOptimizer:
         except (NotImplementedError, OSError, RuntimeError):
             pass
         return 8
+    
+    def check_cuda_availability(self) -> bool:
+        """检查N卡加速是否可用"""
+
+        cuda_available = test_cuda()
+        if cuda_available:
+            self.logger.info("可以使用GPU加速")
+        else:
+            self.logger.info("GPU加速不可用 - 将使用CPU模式")
+        
+        return cuda_available
     
     def get_module_category(self, module: ModuleInfo) -> ModuleCategory:
         """获取模组类型分类
@@ -310,9 +323,14 @@ class ModuleOptimizer:
             return []
         
         # 超过500个根据总属性筛下
-        if len(filtered_modules) > 500:
-            self.logger.info(f"枚举数量超过500, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
-            filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 500)
+        if self.check_cuda_availability():
+            if len(filtered_modules) > 800:
+                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 800)
+                self.logger.info(f"枚举数量超过800, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
+        else:
+            if len(filtered_modules) > 500:
+                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 500)
+                self.logger.info(f"枚举数量超过500, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
         
         enum_solutions = self._strategy_enumeration(filtered_modules)
         unique_solutions = self._complete_deduplicate(enum_solutions)
@@ -364,7 +382,7 @@ class ModuleOptimizer:
                 if aid is not None:
                     min_attr_id_requirements[aid] = int(val)
 
-        cpp_solutions = strategy_enumeration_cpp(
+        cpp_solutions = strategy_enumeration_cuda_cpp(
             cpp_modules,
             target_attrs_set,
             exclude_attrs_set,
