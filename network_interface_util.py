@@ -32,7 +32,7 @@ def get_network_interfaces() -> List[Dict]:
             stats = net_if_stats.get(interface_name)
             
             # 过滤掉回环接口和虚拟接口
-            if interface_name.startswith(('lo', 'Loopback', 'vEthernet', 'VMware')):
+            if interface_name.startswith(('vEthernet', 'VMware')):
                 continue
                 
             # 获取IPv4地址
