@@ -29,6 +29,21 @@ extern "C" int GpuStrategyEnumeration(
     long long* result_indices);
 #endif
 
+inline bool NextCombination(std::array<uint16_t, 4>& comb, size_t n) {
+    const size_t r = 4;
+    for (int pos = static_cast<int>(r) - 1; pos >= 0; --pos) {
+        uint16_t limit = static_cast<uint16_t>(n - r + pos);
+        if (comb[pos] < limit) {
+            ++comb[pos];
+            for (size_t k = pos + 1; k < r; ++k) {
+                comb[k] = static_cast<uint16_t>(comb[k - 1] + 1);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 size_t CombinationCount(size_t n, size_t r) {
     if (r > n) return 0;
     if (r == 0 || r == n) return 1;
@@ -65,18 +80,20 @@ std::vector<CompactSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     const std::unordered_map<int, int>& min_attr_sum_requirements) {
     
     size_t range_size = end_combination - start_combination;
+
     std::vector<CompactSolution> solutions;
     solutions.reserve(range_size);
-    
+
     thread_local std::array<uint16_t, 4> combination_buffer;
     thread_local std::vector<size_t> temp_combination(4);
-    
-    for (size_t i = start_combination; i < end_combination; ++i) {
-        GetCombinationByIndex(n, 4, i, temp_combination);
-        
-        for (size_t j = 0; j < 4; ++j) {
-            combination_buffer[j] = static_cast<uint16_t>(temp_combination[j]);
-        }
+
+    GetCombinationByIndex(n, 4, start_combination, temp_combination);
+    for (size_t j = 0; j < 4; ++j) {
+        combination_buffer[j] = static_cast<uint16_t>(temp_combination[j]);
+    }
+
+    size_t produced = 0;
+    while (produced < range_size) {
         // 先按 -mas 硬性约束筛掉不合格组合
         if (!min_attr_sum_requirements.empty()) {
             bool ok = true;
@@ -92,15 +109,24 @@ std::vector<CompactSolution> ModuleOptimizerCpp::ProcessCombinationRange(
                 }
                 if (got_sum < need_sum) { ok = false; break; }
             }
-            if (!ok) continue;
+            if (ok) {
+                CompactSolution temp_solution(combination_buffer, 0);
+                int total_power = CalculateCombatPowerByPackedIndices(temp_solution.packed_indices, modules, target_attributes, exclude_attributes);
+                temp_solution.score = total_power;
+                solutions.emplace_back(temp_solution);
+            }
+        } else {
+            CompactSolution temp_solution(combination_buffer, 0);
+            int total_power = CalculateCombatPowerByPackedIndices(temp_solution.packed_indices, modules, target_attributes, exclude_attributes);
+            temp_solution.score = total_power;
+            solutions.emplace_back(temp_solution);
         }
 
-        CompactSolution temp_solution(combination_buffer, 0);
-        int total_power = CalculateCombatPowerByPackedIndices(temp_solution.packed_indices, modules, target_attributes, exclude_attributes);
-        temp_solution.score = total_power;
-        solutions.emplace_back(temp_solution);
+        ++produced;
+        if (produced >= range_size) break;
+        if (!NextCombination(combination_buffer, n)) break;
     }
-    
+
     return solutions;
 }
 
