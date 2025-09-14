@@ -77,12 +77,15 @@ std::vector<CompactSolution> ModuleOptimizerCpp::ProcessCombinationRange(
     const std::vector<ModuleInfo>& modules,
     const std::unordered_set<int>& target_attributes,
     const std::unordered_set<int>& exclude_attributes,
-    const std::unordered_map<int, int>& min_attr_sum_requirements) {
+    const std::unordered_map<int, int>& min_attr_sum_requirements,
+    int local_top_capacity) {
     
     size_t range_size = end_combination - start_combination;
 
-    std::vector<CompactSolution> solutions;
-    solutions.reserve(range_size);
+    std::vector<CompactSolution> solution;
+    int ext_space = local_top_capacity;
+    solution.reserve(std::min(range_size, static_cast<size_t>(local_top_capacity + ext_space)));
+    int current_min = std::numeric_limits<int>::min();
 
     thread_local std::array<uint16_t, 4> combination_buffer;
     thread_local std::vector<size_t> temp_combination(4);
@@ -110,16 +113,66 @@ std::vector<CompactSolution> ModuleOptimizerCpp::ProcessCombinationRange(
                 if (got_sum < need_sum) { ok = false; break; }
             }
             if (ok) {
-                CompactSolution temp_solution(combination_buffer, 0);
-                int total_power = CalculateCombatPowerByPackedIndices(temp_solution.packed_indices, modules, target_attributes, exclude_attributes);
-                temp_solution.score = total_power;
-                solutions.emplace_back(temp_solution);
+                uint64_t packed = 0;
+                for (size_t i = 0; i < 4; ++i) {
+                    packed |= (static_cast<uint64_t>(combination_buffer[i]) << (i * 16));
+                }
+                int score = CalculateCombatPowerByPackedIndices(packed, modules, target_attributes, exclude_attributes);
+
+                if (static_cast<int>(solution.size()) < local_top_capacity) {
+                    // 小于local_top_capacity无脑入栈并记录最小值
+                    CompactSolution cs; 
+                    cs.packed_indices = packed; 
+                    cs.score = score;
+                    solution.emplace_back(cs);
+                    if (static_cast<int>(solution.size()) == local_top_capacity) {
+                        int mn = solution[0].score;
+                        for (int i = 1; i < local_top_capacity; ++i) mn = std::min(mn, solution[i].score);
+                        current_min = mn;
+                    }
+                } else if (score > current_min) {
+                    // 在local_top_capacity-ext_space期间比在local_top_capacity内分高的才入栈
+                    CompactSolution cs; 
+                    cs.packed_indices = packed; 
+                    cs.score = score; 
+                    solution.emplace_back(cs);
+                    if (static_cast<int>(solution.size()) == local_top_capacity + ext_space) {
+                        // 保持local_top_capacity为TOP
+                        std::nth_element(solution.begin(), solution.begin() + local_top_capacity, solution.end(),
+                            [](const CompactSolution& a, const CompactSolution& b){ return a.score > b.score; });
+                            solution.resize(local_top_capacity);
+                        int mn = solution[0].score;
+                        // 重新计算最小值
+                        for (int i = 1; i < local_top_capacity; ++i) mn = std::min(mn, solution[i].score);
+                        current_min = mn;
+                    }
+                }
             }
         } else {
-            CompactSolution temp_solution(combination_buffer, 0);
-            int total_power = CalculateCombatPowerByPackedIndices(temp_solution.packed_indices, modules, target_attributes, exclude_attributes);
-            temp_solution.score = total_power;
-            solutions.emplace_back(temp_solution);
+            uint64_t packed = 0;
+            for (size_t i = 0; i < 4; ++i) {
+                packed |= (static_cast<uint64_t>(combination_buffer[i]) << (i * 16));
+            }
+            int score = CalculateCombatPowerByPackedIndices(packed, modules, target_attributes, exclude_attributes);
+
+            if (static_cast<int>(solution.size()) < local_top_capacity) {
+                CompactSolution cs; cs.packed_indices = packed; cs.score = score; solution.emplace_back(cs);
+                if (static_cast<int>(solution.size()) == local_top_capacity) {
+                    int mn = solution[0].score;
+                    for (int i = 1; i < local_top_capacity; ++i) mn = std::min(mn, solution[i].score);
+                    current_min = mn;
+                }
+            } else if (score > current_min) {
+                CompactSolution cs; cs.packed_indices = packed; cs.score = score; solution.emplace_back(cs);
+                if (static_cast<int>(solution.size()) == local_top_capacity + ext_space) {
+                    std::nth_element(solution.begin(), solution.begin() + local_top_capacity, solution.end(),
+                        [](const CompactSolution& a, const CompactSolution& b){ return a.score > b.score; });
+                    solution.resize(local_top_capacity);
+                    int mn = solution[0].score;
+                    for (int i = 1; i < local_top_capacity; ++i) mn = std::min(mn, solution[i].score);
+                    current_min = mn;
+                }
+            }
         }
 
         ++produced;
@@ -127,7 +180,14 @@ std::vector<CompactSolution> ModuleOptimizerCpp::ProcessCombinationRange(
         if (!NextCombination(combination_buffer, n)) break;
     }
 
-    return solutions;
+    // 保持local_top_capacity为TOP
+    if (static_cast<int>(solution.size()) > local_top_capacity) {
+        std::nth_element(solution.begin(), solution.begin() + local_top_capacity, solution.end(),
+            [](const CompactSolution& a, const CompactSolution& b){ return a.score > b.score; });
+        solution.resize(local_top_capacity);
+    }
+
+    return solution;
 }
 
 std::pair<int, std::map<std::string, int>> ModuleOptimizerCpp::CalculateCombatPower(
@@ -347,9 +407,9 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     // 计算组合
     size_t n = candidate_modules.size();
     size_t total_combinations = (n * (n - 1) * (n - 2) * (n - 3)) / 24;
+
     size_t batch_size = std::max(static_cast<size_t>(1000), total_combinations / (max_workers * 4));
-    // 控制内存, 避免枚举模式下爆内存
-    batch_size = std::min(batch_size, static_cast<size_t>(653536));
+    batch_size = std::min(batch_size, static_cast<size_t>(1307072));
     size_t num_batches = (total_combinations + batch_size - 1) / batch_size;
     // 创建线程池
     auto pool = std::make_unique<SimpleThreadPool>(max_workers);
@@ -360,13 +420,17 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumeration(
     for (size_t batch_idx = 0; batch_idx < num_batches; ++batch_idx) {
         size_t start_combination = batch_idx * batch_size;
         size_t end_combination = std::min(start_combination + batch_size, total_combinations);
+        size_t range_size = end_combination - start_combination;
+        int oversample_factor = 2;
+        int local_top_capacity = static_cast<int>(std::min(range_size, static_cast<size_t>(max_solutions * oversample_factor)));
         auto min_req_copy = min_attr_sum_requirements;
         futures.push_back(pool->enqueue(
-            [start_combination, end_combination, n,
+            [start_combination, end_combination, n, local_top_capacity,
              &candidate_modules, target_attributes, exclude_attributes, min_req_copy]() {
                 return ProcessCombinationRange(
                     start_combination, end_combination, n,
-                    candidate_modules, target_attributes, exclude_attributes, min_req_copy);
+                    candidate_modules, target_attributes, exclude_attributes, min_req_copy,
+                    local_top_capacity);
             }
         ));
     }

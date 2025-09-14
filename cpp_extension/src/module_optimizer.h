@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
+#include <limits>
 
 #include "simple_thread_pool.h"
 
@@ -276,7 +277,8 @@ public:
         const std::vector<ModuleInfo>& modules,
         const std::unordered_set<int>& target_attributes = {},
         const std::unordered_set<int>& exclude_attributes = {},
-        const std::unordered_map<int, int>& min_attr_sum_requirements = {}
+        const std::unordered_map<int, int>& min_attr_sum_requirements = {},
+        int local_top_capacity = 0
     );
 
     /// @brief 策略枚举算法
