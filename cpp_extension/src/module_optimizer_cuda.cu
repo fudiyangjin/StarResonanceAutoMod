@@ -4,6 +4,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
 #include <thrust/copy.h>
+#include <thrust/tuple.h>
+#include <thrust/iterator/zip_iterator.h>
 
 /// @brief GPU配置信息结构体
 struct GpuConfig
@@ -222,6 +224,24 @@ __device__ void GpuGetCombinationByIndex(int n, int r, long long index, int *com
     }
 }
 
+__device__ inline bool GpuNextCombination(int n, int r, int *comb)
+{
+    for (int pos = r - 1; pos >= 0; --pos)
+    {
+        int limit = n - r + pos;
+        if (comb[pos] < limit)
+        {
+            ++comb[pos];
+            for (int k = pos + 1; k < r; ++k)
+            {
+                comb[k] = comb[k - 1] + 1;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 /// @brief CUDA枚举算子
 /// @param attr_ids 所有模组的属性ID数组
 /// @param attr_values 所有模组的属性值数组
@@ -257,15 +277,27 @@ __global__ void GpuEnumerationKernel(
     int *scores,
     long long *indices)
 {
-
-    long long global_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long tid = blockIdx.x * blockDim.x + threadIdx.x;
     long long total_threads = gridDim.x * blockDim.x;
 
-    for (long long combo_idx = start_combination + global_idx; combo_idx < end_combination; combo_idx += total_threads)
-    {
-        int combo[4];
-        GpuGetCombinationByIndex(module_count, 4, combo_idx, combo);
+    long long S = start_combination;
+    long long E = end_combination;
+    long long R = E - S;
+    if (R <= 0)
+        return;
 
+    long long L = (R + total_threads - 1) / total_threads;
+    long long seg_start = S + tid * L;
+    if (seg_start >= E)
+        return;
+    long long seg_end = min(seg_start + L, E);
+
+    int combo[4];
+    GpuGetCombinationByIndex(module_count, 4, seg_start, combo);
+
+    long long local_offset = 0;
+    for (long long combo_idx = seg_start; combo_idx < seg_end; ++combo_idx, ++local_offset)
+    {
         if (min_attr_count > 0)
         {
             bool valid = true;
@@ -299,6 +331,8 @@ __global__ void GpuEnumerationKernel(
             }
             if (!valid)
             {
+                if (!GpuNextCombination(module_count, 4, combo))
+                    break;
                 continue;
             }
         }
@@ -313,9 +347,12 @@ __global__ void GpuEnumerationKernel(
             packed |= ((long long)combo[i] << (i * 16));
         }
 
-        long long output_idx = combo_idx - start_combination;
+        long long output_idx = (seg_start - S) + local_offset;
         scores[output_idx] = combat_power;
         indices[output_idx] = packed;
+
+        if (!GpuNextCombination(module_count, 4, combo))
+            break;
     }
 }
 
@@ -328,8 +365,6 @@ void GpuSortTopSolutions(int *d_scores, long long *d_indices, int total_count, i
 {
     thrust::device_ptr<int> scores_ptr(d_scores);
     thrust::device_ptr<long long> indices_ptr(d_indices);
-    thrust::device_vector<int> temp_indices(total_count);
-    thrust::sequence(temp_indices.begin(), temp_indices.end());
     thrust::sort_by_key(scores_ptr, scores_ptr + total_count, indices_ptr, thrust::greater<int>());
 }
 
