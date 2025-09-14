@@ -209,7 +209,7 @@ def main():
     else:
         # 交互式选择
         print("星痕共鸣模组筛选器!")
-        print("版本: V1.4")
+        print("版本: V1.5")
         print("GitHub: https://github.com/fudiyangjin/StarResonanceAutoMod")
         print()
         
