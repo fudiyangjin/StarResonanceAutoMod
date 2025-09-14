@@ -71,7 +71,7 @@ class ModuleOptimizer:
         self.max_attempts = 20             # 贪心+局部搜索最大尝试次数
         self.max_solutions = 100           # 最大解数量
         self.max_workers = 8               # 最大线程数
-        self.enumeration_num = 200         # 并行策略中最大枚举模组数
+        self.enumeration_num = 400         # 并行策略中最大枚举模组数
     
     def _get_current_log_file(self) -> Optional[str]:
         """获取当前日志文件路径
@@ -170,7 +170,7 @@ class ModuleOptimizer:
                     attr_modules[attr_name].append((module, part.value))
         
         attr_count = len(attr_modules.keys())
-        single_attr_num = 90 if attr_count <= 5 else 30
+        single_attr_num = 120 if attr_count <= 5 else 60
 
         candidate_modules = top_modules.copy()
         for attr_name, module_values in attr_modules.items():
@@ -322,15 +322,15 @@ class ModuleOptimizer:
             self.logger.warning(f"{category.value}类型模组数量不足4个, 无法形成完整搭配")
             return []
         
-        # 超过500个根据总属性筛下
+        # 超过800/1000个根据总属性筛下
         if self.check_cuda_availability():
+            if len(filtered_modules) > 1000:
+                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 1000)
+                self.logger.info(f"枚举数量超过1000, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
+        else:
             if len(filtered_modules) > 800:
                 filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 800)
                 self.logger.info(f"枚举数量超过800, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
-        else:
-            if len(filtered_modules) > 500:
-                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 500)
-                self.logger.info(f"枚举数量超过500, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
         
         enum_solutions = self._strategy_enumeration(filtered_modules)
         unique_solutions = self._complete_deduplicate(enum_solutions)
