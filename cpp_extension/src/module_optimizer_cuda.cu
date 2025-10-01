@@ -6,6 +6,7 @@
 #include <thrust/copy.h>
 #include <thrust/tuple.h>
 #include <thrust/iterator/zip_iterator.h>
+#include <cub/cub.cuh>
 
 /// @brief GPU配置信息结构体
 struct GpuConfig
@@ -555,7 +556,6 @@ extern "C" int GpuStrategyEnumeration(
 
     std::vector<int> global_best_scores(max_solutions, 0);
     std::vector<long long> global_best_indices(max_solutions, 0);
-    long long processed = 0;
 
     // 分配GPU内存
     int *d_attr_ids = nullptr;
@@ -567,7 +567,9 @@ extern "C" int GpuStrategyEnumeration(
     int *d_min_attr_ids = nullptr;
     int *d_min_attr_values = nullptr;
     int *d_scores = nullptr;
+    int *d_scores_sorted = nullptr;
     long long *d_indices = nullptr;
+    long long *d_indices_sorted = nullptr;
 
     cudaError_t err;
 
@@ -680,6 +682,19 @@ extern "C" int GpuStrategyEnumeration(
         goto cleanup;
     }
 
+    err = cudaMalloc(&d_scores_sorted, batch_size * sizeof(int));
+    if (err != cudaSuccess)
+    {
+        printf("ERROR: CUDA malloc failed(scores_sorted): %s\n", cudaGetErrorString(err));
+        goto cleanup;
+    }
+    err = cudaMalloc(&d_indices_sorted, batch_size * sizeof(long long));
+    if (err != cudaSuccess)
+    {
+        printf("ERROR: CUDA malloc failed(indices_sorted): %s\n", cudaGetErrorString(err));
+        goto cleanup;
+    }
+
     err = cudaMemcpy(d_attr_ids, module_attr_ids, total_attrs * sizeof(int), cudaMemcpyHostToDevice);
     if (err != cudaSuccess)
     {
@@ -708,6 +723,21 @@ extern "C" int GpuStrategyEnumeration(
         goto cleanup;
     }
 
+    // 计算排序空间
+    void *d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+    cub::DeviceRadixSort::SortPairsDescending(
+        d_temp_storage, temp_storage_bytes,
+        d_scores, d_scores_sorted,
+        d_indices, d_indices_sorted,
+        (int)batch_size);
+    err = cudaMalloc(&d_temp_storage, temp_storage_bytes);
+    if (err != cudaSuccess)
+    {
+        printf("ERROR: CUDA malloc failed(temp_storage): %s\n", cudaGetErrorString(err));
+        goto cleanup;
+    }
+
     // 开始处理所有组合
     for (long long batch_start = 0; batch_start < total_combinations; batch_start += batch_size)
     {
@@ -720,7 +750,6 @@ extern "C" int GpuStrategyEnumeration(
             printf("ERROR: CUDA memset failed(scores): %s\n", cudaGetErrorString(err));
             goto cleanup;
         }
-
         err = cudaMemset(d_indices, 0, current_batch_size * sizeof(long long));
         if (err != cudaSuccess)
         {
@@ -759,7 +788,11 @@ extern "C" int GpuStrategyEnumeration(
             // 排序
             if (current_batch_size >= max_solutions)
             {
-                GpuSortTopSolutions(d_scores, d_indices, (int)current_batch_size, max_solutions);
+                cub::DeviceRadixSort::SortPairsDescending(
+                    d_temp_storage, temp_storage_bytes,
+                    d_scores, d_scores_sorted,
+                    d_indices, d_indices_sorted,
+                    (int)current_batch_size);
             }
         }
 
@@ -769,20 +802,36 @@ extern "C" int GpuStrategyEnumeration(
         std::vector<int> batch_scores(results_to_transfer);
         std::vector<long long> batch_indices(results_to_transfer);
 
-        err = cudaMemcpy(batch_scores.data(), d_scores, results_to_transfer * sizeof(int), cudaMemcpyDeviceToHost);
-        if (err != cudaSuccess)
+        if (current_batch_size >= max_solutions)
         {
-            printf("ERROR: CUDA result transfer failed(batch_scores): %s\n", cudaGetErrorString(err));
-            printf("Debug: d_scores=%p, batch_scores.data()=%p, size=%d bytes\n",
-                   d_scores, batch_scores.data(), results_to_transfer * (int)sizeof(int));
-            goto cleanup;
-        }
+            err = cudaMemcpy(batch_scores.data(), d_scores_sorted, results_to_transfer * sizeof(int), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess)
+            {
+                printf("ERROR: CUDA result transfer failed(batch_scores sorted): %s\n", cudaGetErrorString(err));
+                goto cleanup;
+            }
 
-        err = cudaMemcpy(batch_indices.data(), d_indices, results_to_transfer * sizeof(long long), cudaMemcpyDeviceToHost);
-        if (err != cudaSuccess)
+            err = cudaMemcpy(batch_indices.data(), d_indices_sorted, results_to_transfer * sizeof(long long), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess)
+            {
+                printf("ERROR: CUDA result transfer failed(batch_indices sorted): %s\n", cudaGetErrorString(err));
+                goto cleanup;
+            }
+        }
+        else
         {
-            printf("ERROR: CUDA result transfer failed(batch_indices): %s\n", cudaGetErrorString(err));
-            goto cleanup;
+            err = cudaMemcpy(batch_scores.data(), d_scores, results_to_transfer * sizeof(int), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess)
+            {
+                printf("ERROR: CUDA result transfer failed(batch_scores): %s\n", cudaGetErrorString(err));
+                goto cleanup;
+            }
+            err = cudaMemcpy(batch_indices.data(), d_indices, results_to_transfer * sizeof(long long), cudaMemcpyDeviceToHost);
+            if (err != cudaSuccess)
+            {
+                printf("ERROR: CUDA result transfer failed(batch_indices): %s\n", cudaGetErrorString(err));
+                goto cleanup;
+            }
         }
 
         // 合并当前批次结果到全局TOP
@@ -814,8 +863,6 @@ extern "C" int GpuStrategyEnumeration(
                 global_best_indices[insert_pos] = batch_indices[i];
             }
         }
-
-        processed += current_batch_size;
     }
 
     for (int i = 0; i < max_solutions; ++i)
@@ -846,6 +893,12 @@ cleanup:
         cudaFree(d_scores);
     if (d_indices)
         cudaFree(d_indices);
+    if (d_scores_sorted)
+        cudaFree(d_scores_sorted);
+    if (d_indices_sorted)
+        cudaFree(d_indices_sorted);
+    if (d_temp_storage)
+        cudaFree(d_temp_storage);
 
     return (err == cudaSuccess) ? max_solutions : 0;
 }
