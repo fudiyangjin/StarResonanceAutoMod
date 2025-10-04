@@ -299,6 +299,56 @@ __global__ void GpuEnumerationKernel(
     long long local_offset = 0;
     for (long long combo_idx = seg_start; combo_idx < seg_end; ++combo_idx, ++local_offset)
     {
+        // 计算当前输出位置
+        long long output_idx = (seg_start - S) + local_offset;
+
+        // 先聚合再最小属性过滤
+        int aggregated_ids[20];
+        int aggregated_values[20];
+        int agg_count = 0;
+        int total_attr_value = 0;
+
+#pragma unroll
+        for (int m = 0; m < 4; ++m)
+        {
+            int module_idx = combo[m];
+            int start_offset = offsets[module_idx];
+            int attr_cnt = attr_counts[module_idx];
+
+#pragma unroll
+            for (int i = 0; i < 3; ++i)
+            {
+                if (i < attr_cnt)
+                {
+                    int attr_id = attr_ids[start_offset + i];
+                    int attr_value = attr_values[start_offset + i];
+                    total_attr_value += attr_value;
+
+                    int found_idx = -1;
+#pragma unroll
+                    for (int j = 0; j < 12; ++j)
+                    {
+                        if (j < agg_count && aggregated_ids[j] == attr_id)
+                        {
+                            found_idx = j;
+                            break;
+                        }
+                    }
+
+                    if (found_idx >= 0)
+                    {
+                        aggregated_values[found_idx] += attr_value;
+                    }
+                    else
+                    {
+                        aggregated_ids[agg_count] = attr_id;
+                        aggregated_values[agg_count] = attr_value;
+                        agg_count++;
+                    }
+                }
+            }
+        }
+
         if (min_attr_count > 0)
         {
             bool valid = true;
@@ -308,22 +358,14 @@ __global__ void GpuEnumerationKernel(
                 int required_min_value = min_attr_values[req_idx];
                 int actual_sum = 0;
 
-                for (int m = 0; m < 4; ++m)
+                for (int j = 0; j < agg_count; ++j)
                 {
-                    int module_idx = combo[m];
-                    int start_offset = offsets[module_idx];
-                    int attr_cnt = attr_counts[module_idx];
-
-                    for (int i = 0; i < attr_cnt; ++i)
+                    if (aggregated_ids[j] == required_attr_id)
                     {
-                        int attr_id = attr_ids[start_offset + i];
-                        if (attr_id == required_attr_id)
-                        {
-                            actual_sum += attr_values[start_offset + i];
-                        }
+                        actual_sum = aggregated_values[j];
+                        break;
                     }
                 }
-
                 if (actual_sum < required_min_value)
                 {
                     valid = false;
@@ -332,15 +374,78 @@ __global__ void GpuEnumerationKernel(
             }
             if (!valid)
             {
+                scores[output_idx] = 0;
+                indices[output_idx] = 0;
                 if (!GpuNextCombination(module_count, 4, combo))
+                {
                     break;
+                }
                 continue;
             }
         }
 
-        int combat_power = CalculatePowerGpu(
-            combo, attr_ids, attr_values, attr_counts, offsets,
-            target_attrs, target_count, exclude_attrs, exclude_count);
+        int threshold_power = 0;
+#pragma unroll
+        for (int i = 0; i < 12; ++i)
+        {
+            if (i < agg_count)
+            {
+                int attr_id = aggregated_ids[i];
+                int attr_value = aggregated_values[i];
+
+                int max_level = 0;
+#pragma unroll
+                for (int j = 0; j < 6; ++j)
+                {
+                    if (attr_value >= D_ATTR_THRESHOLDS[j])
+                    {
+                        max_level = j + 1;
+                    }
+                }
+
+                if (max_level > 0)
+                {
+                    bool is_special = false;
+#pragma unroll
+                    for (int j = 0; j < 8; ++j)
+                    {
+                        if (attr_id == D_SPECIAL_ATTRS[j])
+                        {
+                            is_special = true;
+                            break;
+                        }
+                    }
+
+                    int base_power = is_special ? D_SPECIAL_POWER_VALUES[max_level - 1] : D_BASIC_POWER_VALUES[max_level - 1];
+                    int power_multiplier = 1;
+
+                    for (int j = 0; j < target_count; ++j)
+                    {
+                        if (attr_id == target_attrs[j])
+                        {
+                            power_multiplier = 2;
+                            break;
+                        }
+                    }
+                    if (power_multiplier != 2)
+                    {
+                        for (int j = 0; j < exclude_count; ++j)
+                        {
+                            if (attr_id == exclude_attrs[j])
+                            {
+                                power_multiplier = 0;
+                                break;
+                            }
+                        }
+                    }
+
+                    threshold_power += base_power * power_multiplier;
+                }
+            }
+        }
+
+        int total_attr_power = D_TOTAL_ATTR_POWER_VALUES[total_attr_value];
+        int combat_power = threshold_power + total_attr_power;
 
         long long packed = 0;
         for (int i = 0; i < 4; ++i)
@@ -348,12 +453,13 @@ __global__ void GpuEnumerationKernel(
             packed |= ((long long)combo[i] << (i * 16));
         }
 
-        long long output_idx = (seg_start - S) + local_offset;
         scores[output_idx] = combat_power;
         indices[output_idx] = packed;
 
         if (!GpuNextCombination(module_count, 4, combo))
+        {
             break;
+        }
     }
 }
 
