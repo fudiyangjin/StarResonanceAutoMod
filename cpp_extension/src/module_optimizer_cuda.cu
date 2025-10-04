@@ -541,11 +541,11 @@ void CalculateOptimalParams(GpuConfig *config, long long total_combinations)
     long long memory_limited_batch = available_memory / (sizeof(int) + sizeof(long long));
 
     // 基于计算能力的batch大小
-    long long compute_limited_batch = max_concurrent_threads * 1000;
+    long long compute_limited_batch = max_concurrent_threads * 3000;
 
     // 取较小值, 但至少10万, 最大500万
     config->optimal_batch_size = max(100000LL, min(memory_limited_batch, compute_limited_batch));
-    config->optimal_batch_size = min(config->optimal_batch_size, 5000000LL);
+    config->optimal_batch_size = min(config->optimal_batch_size, 22500000LL);
 }
 
 /// @brief 用于判断是否支持CUDA加速
@@ -848,20 +848,6 @@ extern "C" int GpuStrategyEnumeration(
     for (long long batch_start = 0; batch_start < total_combinations; batch_start += batch_size)
     {
         long long current_batch_size = min(batch_size, total_combinations - batch_start);
-
-        // 创建当前结果内存
-        err = cudaMemset(d_scores, 0, current_batch_size * sizeof(int));
-        if (err != cudaSuccess)
-        {
-            printf("ERROR: CUDA memset failed(scores): %s\n", cudaGetErrorString(err));
-            goto cleanup;
-        }
-        err = cudaMemset(d_indices, 0, current_batch_size * sizeof(long long));
-        if (err != cudaSuccess)
-        {
-            printf("ERROR: CUDA memset failed(indices): %s\n", cudaGetErrorString(err));
-            goto cleanup;
-        }
 
         // 执行kernel
         {
