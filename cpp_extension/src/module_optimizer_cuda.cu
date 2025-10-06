@@ -43,130 +43,6 @@ __constant__ int D_TOTAL_ATTR_POWER_VALUES[121] = {
     471, 477, 483, 489, 495, 500, 506, 512, 518, 524, 530, 535, 541, 547, 553, 559, 565, 570, 576, 582,
     588, 594, 599, 605, 611, 617, 623, 629, 634, 640, 646, 652, 658, 664, 669, 675, 681, 687, 693, 699};
 
-/// @brief 计算模组组合的战斗力
-/// @param combo 模组组合索引数组
-/// @param attr_ids 所有模组的属性ID数组
-/// @param attr_values 所有模组的属性值数组
-/// @param attr_counts 每个模组的属性数量数组
-/// @param offsets 每个模组在属性数组中的偏移量
-/// @param target_attrs 目标属性ID数组
-/// @param target_count 目标属性数量
-/// @param exclude_attrs 排除属性ID数组
-/// @param exclude_count 排除属性数量
-/// @return 战力
-__device__ int CalculatePowerGpu(
-    const int *combo,
-    const int *attr_ids,
-    const int *attr_values,
-    const int *attr_counts,
-    const int *offsets,
-    const int *target_attrs,
-    int target_count,
-    const int *exclude_attrs,
-    int exclude_count)
-{
-    int aggregated_ids[20];
-    int aggregated_values[20];
-    int agg_count = 0;
-    int total_attr_value = 0;
-
-    for (int m = 0; m < 4; ++m)
-    {
-        int module_idx = combo[m];
-        int start_offset = offsets[module_idx];
-        int attr_cnt = attr_counts[module_idx];
-
-        for (int i = 0; i < attr_cnt; ++i)
-        {
-            int attr_id = attr_ids[start_offset + i];
-            int attr_value = attr_values[start_offset + i];
-
-            total_attr_value += attr_value;
-
-            int found_idx = -1;
-            for (int j = 0; j < agg_count; ++j)
-            {
-                if (aggregated_ids[j] == attr_id)
-                {
-                    found_idx = j;
-                    break;
-                }
-            }
-
-            if (found_idx >= 0)
-            {
-                aggregated_values[found_idx] += attr_value;
-            }
-            else
-            {
-                aggregated_ids[agg_count] = attr_id;
-                aggregated_values[agg_count] = attr_value;
-                agg_count++;
-            }
-        }
-    }
-
-    int threshold_power = 0;
-
-    for (int i = 0; i < agg_count; ++i)
-    {
-        int attr_id = aggregated_ids[i];
-        int attr_value = aggregated_values[i];
-
-        int max_level = 0;
-        for (int j = 0; j < 6; ++j)
-        {
-            if (attr_value >= D_ATTR_THRESHOLDS[j])
-            {
-                max_level = j + 1;
-            }
-        }
-
-        if (max_level > 0)
-        {
-            bool is_special = false;
-            for (int j = 0; j < 8; ++j)
-            {
-                if (attr_id == D_SPECIAL_ATTRS[j])
-                {
-                    is_special = true;
-                    break;
-                }
-            }
-
-            int base_power = is_special ? D_SPECIAL_POWER_VALUES[max_level - 1] : D_BASIC_POWER_VALUES[max_level - 1];
-            int power_multiplier = 1;
-
-            for (int j = 0; j < target_count; ++j)
-            {
-                if (attr_id == target_attrs[j])
-                {
-                    power_multiplier = 2;
-                    break;
-                }
-            }
-
-            if (power_multiplier != 2)
-            {
-                for (int j = 0; j < exclude_count; ++j)
-                {
-                    if (attr_id == exclude_attrs[j])
-                    {
-                        power_multiplier = 0;
-                        break;
-                    }
-                }
-            }
-
-            threshold_power += base_power * power_multiplier;
-        }
-    }
-
-    int total_attr_power = D_TOTAL_ATTR_POWER_VALUES[total_attr_value];
-
-    return threshold_power + total_attr_power;
-}
-
 /// @brief 用于判断是否支持CUDA加速
 /// @param data 数据数组指针
 /// @param size 数据数组大小
@@ -463,16 +339,102 @@ __global__ void GpuEnumerationKernel(
     }
 }
 
-/// @brief 获取前TOP解
-/// @param d_scores 分数数组
-/// @param d_indices 索引数组
-/// @param total_count 总结果数量
-/// @param top_count 需要的TOP结果
-void GpuSortTopSolutions(int *d_scores, long long *d_indices, int total_count, int top_count)
+__global__ void HistogramByteKernel(
+    const int *__restrict__ scores,
+    long long n,
+    unsigned int prefix_mask,
+    unsigned int prefix_value,
+    int byte_idx,
+    unsigned int *__restrict__ g_hist)
 {
-    thrust::device_ptr<int> scores_ptr(d_scores);
-    thrust::device_ptr<long long> indices_ptr(d_indices);
-    thrust::sort_by_key(scores_ptr, scores_ptr + total_count, indices_ptr, thrust::greater<int>());
+    // block存直方图到共享内存, 再原子到全局
+    __shared__ unsigned int s_hist[256];
+    for (int i = threadIdx.x; i < 256; i += blockDim.x)
+    {
+        s_hist[i] = 0U;
+    }
+    __syncthreads();
+
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long stride = (long long)blockDim.x * (long long)gridDim.x;
+    int shift = byte_idx * 8;
+    for (; idx < n; idx += stride)
+    {
+        unsigned int s = (unsigned int)scores[idx];
+        if ((s & prefix_mask) == prefix_value)
+        {
+            unsigned int bucket = (s >> shift) & 0xFFU;
+            atomicAdd(&s_hist[bucket], 1U);
+        }
+    }
+    __syncthreads();
+    for (int i = threadIdx.x; i < 256; i += blockDim.x)
+    {
+        atomicAdd(&g_hist[i], s_hist[i]);
+    }
+}
+
+static int Radix256SelectThreshold(
+    const int *d_scores,
+    long long n,
+    int k,
+    int grid_size,
+    int block_size)
+{
+    unsigned int *d_hist = nullptr;
+    cudaMalloc(&d_hist, 256 * sizeof(unsigned int));
+
+    unsigned int prefix_mask = 0U;
+    unsigned int prefix_value = 0U;
+
+    // 从高到低依次确定TOP-K的阈值
+    for (int byte_idx = 3; byte_idx >= 0; --byte_idx)
+    {
+        cudaMemset(d_hist, 0, 256 * sizeof(unsigned int));
+        HistogramByteKernel<<<grid_size, block_size>>>(d_scores, n, prefix_mask, prefix_value, byte_idx, d_hist);
+
+        unsigned int h_hist[256];
+        cudaMemcpy(h_hist, d_hist, 256 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+        // 确定当前字节在哪个桶中
+        unsigned int acc = 0U;
+        int chosen_bucket = 0;
+        for (int b = 255; b >= 0; --b)
+        {
+            acc += h_hist[b];
+            if (acc >= (unsigned int)k)
+            {
+                chosen_bucket = b;
+                break;
+            }
+        }
+
+        // 确定下个字节子集中需要找的k值
+        unsigned int bigger_acc = acc - h_hist[chosen_bucket];
+        k -= (int)bigger_acc;
+
+        // 拼接阈值
+        unsigned int mask_byte = 0xFFU << (byte_idx * 8);
+        prefix_mask |= mask_byte;
+        prefix_value |= ((unsigned int)chosen_bucket << (byte_idx * 8));
+    }
+
+    cudaFree(d_hist);
+    return (int)prefix_value;
+}
+
+__global__ void SetFlagsGeKernel(
+    const int *__restrict__ scores,
+    long long n,
+    int threshold,
+    unsigned char *__restrict__ flags)
+{
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long stride = (long long)blockDim.x * (long long)gridDim.x;
+    for (; idx < n; idx += stride)
+    {
+        flags[idx] = ((int)scores[idx] >= threshold) ? 1 : 0;
+    }
 }
 
 /// @brief 获取GPU配置信息
@@ -505,22 +467,8 @@ int GetGpuConfig(GpuConfig *config)
 /// @param total_combinations 总组合数
 void CalculateOptimalParams(GpuConfig *config, long long total_combinations)
 {
-    // 计算优化的block大小
-    if (config->compute_capability_major >= 7)
-    {
-        // 较新的GPU
-        config->optimal_block_size = 512;
-    }
-    else if (config->compute_capability_major >= 6)
-    {
-        // Pascal架构
-        config->optimal_block_size = 256;
-    }
-    else
-    {
-        // 较老的GPU
-        config->optimal_block_size = 192;
-    }
+
+    config->optimal_block_size = 512;
 
     // 确保不超过硬件限制
     config->optimal_block_size = min(config->optimal_block_size, config->max_threads_per_block);
@@ -676,6 +624,8 @@ extern "C" int GpuStrategyEnumeration(
     int *d_scores_sorted = nullptr;
     long long *d_indices = nullptr;
     long long *d_indices_sorted = nullptr;
+    unsigned char *d_flags = nullptr;
+    int *d_num_selected = nullptr;
 
     cudaError_t err;
 
@@ -794,7 +744,28 @@ extern "C" int GpuStrategyEnumeration(
         printf("ERROR: CUDA malloc failed(scores_sorted): %s\n", cudaGetErrorString(err));
         goto cleanup;
     }
+
     err = cudaMalloc(&d_indices_sorted, batch_size * sizeof(long long));
+    if (err != cudaSuccess)
+    {
+        printf("ERROR: CUDA malloc failed(d_indices_sorted): %s\n", cudaGetErrorString(err));
+        goto cleanup;
+    }
+
+    err = cudaMalloc(&d_flags, batch_size * sizeof(unsigned char));
+    if (err != cudaSuccess)
+    {
+        printf("ERROR: CUDA malloc failed(flags): %s\n", cudaGetErrorString(err));
+        goto cleanup;
+    }
+
+    err = cudaMalloc(&d_num_selected, sizeof(int));
+    if (err != cudaSuccess)
+    {
+        printf("ERROR: CUDA malloc failed(num_selected): %s\n", cudaGetErrorString(err));
+        goto cleanup;
+    }
+
     if (err != cudaSuccess)
     {
         printf("ERROR: CUDA malloc failed(indices_sorted): %s\n", cudaGetErrorString(err));
@@ -831,12 +802,30 @@ extern "C" int GpuStrategyEnumeration(
 
     // 计算排序空间
     void *d_temp_storage = nullptr;
-    size_t temp_storage_bytes = 0;
+    size_t temp_storage_bytes_sort = 0;
+    size_t temp_storage_bytes_select_scores = 0;
+    size_t temp_storage_bytes_select_indices = 0;
+
     cub::DeviceRadixSort::SortPairsDescending(
-        d_temp_storage, temp_storage_bytes,
+        d_temp_storage, temp_storage_bytes_sort,
         d_scores, d_scores_sorted,
         d_indices, d_indices_sorted,
         (int)batch_size);
+
+    int *d_num_selected_dummy = d_num_selected;
+    cub::DeviceSelect::Flagged(
+        d_temp_storage, temp_storage_bytes_select_scores,
+        d_scores, d_flags, d_scores_sorted, d_num_selected_dummy,
+        (int)batch_size);
+    cub::DeviceSelect::Flagged(
+        d_temp_storage, temp_storage_bytes_select_indices,
+        d_indices, d_flags, d_indices_sorted, d_num_selected_dummy,
+        (int)batch_size);
+
+    size_t temp_storage_bytes = temp_storage_bytes_sort;
+    temp_storage_bytes = max(temp_storage_bytes, temp_storage_bytes_select_scores);
+    temp_storage_bytes = max(temp_storage_bytes, temp_storage_bytes_select_indices);
+
     err = cudaMalloc(&d_temp_storage, temp_storage_bytes);
     if (err != cudaSuccess)
     {
@@ -877,55 +866,59 @@ extern "C" int GpuStrategyEnumeration(
                 goto cleanup;
             }
 
-            // 排序
-            if (current_batch_size >= max_solutions)
+            // 根据字节Radix得到TOP-K阈值
+            int grid_sel = min(gpu_config.optimal_grid_size, (int)((current_batch_size + block.x - 1) / block.x));
+            int threshold = Radix256SelectThreshold(d_scores, current_batch_size, max_solutions, grid_sel, block.x);
+
+            // 打标记
+            SetFlagsGeKernel<<<grid_sel, block>>>(d_scores, current_batch_size, threshold, d_flags);
+            cub::DeviceSelect::Flagged(
+                d_temp_storage, temp_storage_bytes,
+                d_scores, d_flags, d_scores_sorted, d_num_selected,
+                (int)current_batch_size);
+            cub::DeviceSelect::Flagged(
+                d_temp_storage, temp_storage_bytes,
+                d_indices, d_flags, d_indices_sorted, d_num_selected,
+                (int)current_batch_size);
+
+            int h_selected = 0;
+            cudaMemcpy(&h_selected, d_num_selected, sizeof(int), cudaMemcpyDeviceToHost);
+
+            if (h_selected > 1)
             {
                 cub::DeviceRadixSort::SortPairsDescending(
                     d_temp_storage, temp_storage_bytes,
-                    d_scores, d_scores_sorted,
-                    d_indices, d_indices_sorted,
-                    (int)current_batch_size);
+                    d_scores_sorted, d_scores,
+                    d_indices_sorted, d_indices,
+                    h_selected);
+            }
+            else if (h_selected == 1)
+            {
+                cudaMemcpy(d_scores, d_scores_sorted, sizeof(int), cudaMemcpyDeviceToDevice);
+                cudaMemcpy(d_indices, d_indices_sorted, sizeof(long long), cudaMemcpyDeviceToDevice);
             }
         }
 
         // 获取当前批次Top解
-        int results_to_transfer = min((long long)max_solutions, current_batch_size);
+        int h_selected = 0;
+        cudaMemcpy(&h_selected, d_num_selected, sizeof(int), cudaMemcpyDeviceToHost);
+        int results_to_transfer = min(max_solutions, (h_selected > 0 ? h_selected : (int)current_batch_size));
 
         std::vector<int> batch_scores(results_to_transfer);
         std::vector<long long> batch_indices(results_to_transfer);
 
-        if (current_batch_size >= max_solutions)
+        err = cudaMemcpy(batch_scores.data(), d_scores, results_to_transfer * sizeof(int), cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess)
         {
-            err = cudaMemcpy(batch_scores.data(), d_scores_sorted, results_to_transfer * sizeof(int), cudaMemcpyDeviceToHost);
-            if (err != cudaSuccess)
-            {
-                printf("ERROR: CUDA result transfer failed(batch_scores sorted): %s\n", cudaGetErrorString(err));
-                goto cleanup;
-            }
-
-            err = cudaMemcpy(batch_indices.data(), d_indices_sorted, results_to_transfer * sizeof(long long), cudaMemcpyDeviceToHost);
-            if (err != cudaSuccess)
-            {
-                printf("ERROR: CUDA result transfer failed(batch_indices sorted): %s\n", cudaGetErrorString(err));
-                goto cleanup;
-            }
+            printf("ERROR: CUDA result transfer failed(batch_scores): %s\n", cudaGetErrorString(err));
+            goto cleanup;
         }
-        else
+        err = cudaMemcpy(batch_indices.data(), d_indices, results_to_transfer * sizeof(long long), cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess)
         {
-            err = cudaMemcpy(batch_scores.data(), d_scores, results_to_transfer * sizeof(int), cudaMemcpyDeviceToHost);
-            if (err != cudaSuccess)
-            {
-                printf("ERROR: CUDA result transfer failed(batch_scores): %s\n", cudaGetErrorString(err));
-                goto cleanup;
-            }
-            err = cudaMemcpy(batch_indices.data(), d_indices, results_to_transfer * sizeof(long long), cudaMemcpyDeviceToHost);
-            if (err != cudaSuccess)
-            {
-                printf("ERROR: CUDA result transfer failed(batch_indices): %s\n", cudaGetErrorString(err));
-                goto cleanup;
-            }
+            printf("ERROR: CUDA result transfer failed(batch_indices): %s\n", cudaGetErrorString(err));
+            goto cleanup;
         }
-
         // 合并当前批次结果到全局TOP
         for (int i = 0; i < results_to_transfer; ++i)
         {
@@ -989,6 +982,10 @@ cleanup:
         cudaFree(d_scores_sorted);
     if (d_indices_sorted)
         cudaFree(d_indices_sorted);
+    if (d_flags)
+        cudaFree(d_flags);
+    if (d_num_selected)
+        cudaFree(d_num_selected);
     if (d_temp_storage)
         cudaFree(d_temp_storage);
 
