@@ -261,19 +261,19 @@ __device__ inline bool GpuNextCombination(int n, int r, int *comb)
 /// @param scores 输出参数: 计算得到的战斗力数组
 /// @param indices 输出参数: 打包的模组索引数组
 __global__ void GpuEnumerationKernel(
-    const int *attr_ids,
-    const int *attr_values,
-    const int *attr_counts,
-    const int *offsets,
+    const int *__restrict__ attr_ids,
+    const int *__restrict__ attr_values,
+    const int *__restrict__ attr_counts,
+    const int *__restrict__ offsets,
     int module_count,
     long long start_combination,
     long long end_combination,
-    const int *target_attrs,
+    const int *__restrict__ target_attrs,
     int target_count,
-    const int *exclude_attrs,
+    const int *__restrict__ exclude_attrs,
     int exclude_count,
-    const int *min_attr_ids,
-    const int *min_attr_values,
+    const int *__restrict__ min_attr_ids,
+    const int *__restrict__ min_attr_values,
     int min_attr_count,
     int *scores,
     long long *indices)
