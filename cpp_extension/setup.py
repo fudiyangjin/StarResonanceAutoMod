@@ -4,6 +4,41 @@ import subprocess
 from setuptools import setup, Extension
 from pybind11.setup_helpers import Pybind11Extension
 import pybind11
+from pathlib import Path
+
+# 检测 OpenCL 
+def find_opencl():
+    """查找OpenCL"""
+    fixed_cuda = r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8'
+    candidates = [{
+        'include': os.path.join(fixed_cuda, 'include'),
+        'libdir': os.path.join(fixed_cuda, 'lib', 'x64'),
+        'lib': os.path.join(fixed_cuda, 'lib', 'x64', 'OpenCL.lib')
+    }]
+
+    # 其次：环境变量 OPENCL_HOME
+    env_home = os.environ.get('OPENCL_HOME')
+    if env_home:
+        candidates.append({
+            'include': os.path.join(env_home, 'include'),
+            'libdir': os.path.join(env_home, 'lib', 'x64'),
+            'lib': os.path.join(env_home, 'lib', 'x64', 'OpenCL.lib')
+        })
+    # 次选：CUDA 环境（NVIDIA Toolkit 常包含 OpenCL.lib 与 CL 头文件）
+    cuda_env_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
+    if cuda_env_home:
+        candidates.append({
+            'include': os.path.join(cuda_env_home, 'include'),
+            'libdir': os.path.join(cuda_env_home, 'lib', 'x64'),
+            'lib': os.path.join(cuda_env_home, 'lib', 'x64', 'OpenCL.lib')
+        })
+
+    for c in candidates:
+        if c['include'] and os.path.exists(c['include']) and os.path.exists(c['lib']):
+            print(f"✅ 找到OpenCL构建依赖: include={c['include']} lib={c['lib']}")
+            return c
+    print("⚠️ 未找到OpenCL构建依赖(跳过OpenCL支持).")
+    return None
 
 def find_cuda():
     """查找CUDA安装路径"""
@@ -64,9 +99,6 @@ def compile_cuda_code(cuda_home):
         all_compiled = True
         for src_file, obj_file in cuda_files:
             # 支持的架构包括：
-            # - sm_60: GTX 1000系列 (GTX 1060, 1070, 1080等)  
-            # - sm_61: GTX 1000系列 (GTX 1050, 1050 Ti等)
-            # - sm_70: GTX 1080 Ti, Titan Xp等
             # - sm_75: RTX 2000系列 (RTX 2060, 2070, 2080等)
             # - sm_86: RTX 3000系列
             # - sm_89: RTX 4000系列 (RTX 4060, 4070, 4080等)
@@ -133,7 +165,8 @@ if use_cuda:
 # 源文件列表
 source_files = [
     "src/pybind11_wrapper.cpp",
-    "src/module_optimizer.cpp"
+    "src/module_optimizer.cpp",
+    "src/module_optimizer_opencl.cpp",
 ]
 
 # 库和包含目录
@@ -166,6 +199,21 @@ if use_cuda:
         use_cuda = False
 else:
     print("⚠️ 未检测到CUDA, 使用CPU版本")
+
+# 可选启用 OpenCL：
+opencl_conf = find_opencl()
+use_opencl = opencl_conf is not None
+if use_opencl:
+    if is_windows:
+        extra_compile_args.append("/DUSE_OPENCL")
+    else:
+        extra_compile_args.append("-DUSE_OPENCL")
+    include_dirs.append(opencl_conf['include'])
+    library_dirs.append(opencl_conf['libdir'])
+    libraries.append('OpenCL')
+    print("✅ 启用OpenCL支持")
+else:
+    print("未启用OpenCL(未找到构建依赖), 将仅提供CUDA/CPU")
 
 # 定义扩展模块
 ext_modules = [

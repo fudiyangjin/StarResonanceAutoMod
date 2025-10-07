@@ -597,6 +597,37 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumerationCUDA(
 #endif
 }
 
+#ifdef USE_OPENCL
+extern "C" int TestOpenCL();
+#endif
+
+std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumerationGPU(
+    const std::vector<ModuleInfo>& modules,
+    const std::unordered_set<int>& target_attributes,
+    const std::unordered_set<int>& exclude_attributes,
+    const std::unordered_map<int, int>& min_attr_sum_requirements,
+    int max_solutions,
+    int max_workers) {
+#ifdef USE_CUDA
+    if (TestCuda()) {
+        return StrategyEnumerationCUDA(
+            modules, target_attributes, exclude_attributes,
+            min_attr_sum_requirements, max_solutions, max_workers);
+    }
+#endif
+
+#ifdef USE_OPENCL
+    if (TestOpenCL()) {
+        return StrategyEnumerationOpenCL(
+            modules, target_attributes, exclude_attributes,
+            min_attr_sum_requirements, max_solutions, max_workers);
+    }
+#endif
+    return StrategyEnumeration(
+        modules, target_attributes, exclude_attributes,
+        min_attr_sum_requirements, max_solutions, max_workers);
+}
+
 std::vector<ModuleSolution> ModuleOptimizerCpp::OptimizeModules(
     const std::vector<ModuleInfo>& modules,
     const std::unordered_set<int>& target_attributes,
