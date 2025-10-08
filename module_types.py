@@ -12,12 +12,15 @@ class ModuleType(Enum):
     BASIC_ATTACK = 5500101
     HIGH_PERFORMANCE_ATTACK = 5500102
     EXCELLENT_ATTACK = 5500103
+    EXCELLENT_ATTACK_PREFERRED = 5500104
     BASIC_HEALING = 5500201
     HIGH_PERFORMANCE_HEALING = 5500202
     EXCELLENT_HEALING = 5500203
+    EXCELLENT_HEALING_PREFERRED = 5500204
     BASIC_PROTECTION = 5500301
     HIGH_PERFORMANCE_PROTECTION = 5500302
     EXCELLENT_PROTECTION = 5500303
+    EXCELLENT_PROTECTION_PREFERRED = 5500304
 
 
 class ModuleAttrType(Enum):
@@ -58,12 +61,15 @@ MODULE_NAMES = {
     ModuleType.BASIC_ATTACK.value: "基础攻击",
     ModuleType.HIGH_PERFORMANCE_ATTACK.value: "高性能攻击",
     ModuleType.EXCELLENT_ATTACK.value: "卓越攻击",
+    ModuleType.EXCELLENT_ATTACK_PREFERRED.value: "卓越攻击-优选",
     ModuleType.BASIC_HEALING.value: "基础治疗",
     ModuleType.HIGH_PERFORMANCE_HEALING.value: "高性能治疗",
     ModuleType.EXCELLENT_HEALING.value: "卓越辅助",
+    ModuleType.EXCELLENT_HEALING_PREFERRED.value: "卓越辅助-优选",
     ModuleType.BASIC_PROTECTION.value: "基础防护",
     ModuleType.HIGH_PERFORMANCE_PROTECTION.value: "高性能守护",
     ModuleType.EXCELLENT_PROTECTION.value: "卓越守护",
+    ModuleType.EXCELLENT_PROTECTION_PREFERRED.value: "卓越守护-优选",
 }
 
 # 模组属性名称映射
@@ -99,12 +105,15 @@ MODULE_CATEGORY_MAP = {
     ModuleType.BASIC_ATTACK.value: ModuleCategory.ATTACK,
     ModuleType.HIGH_PERFORMANCE_ATTACK.value: ModuleCategory.ATTACK,
     ModuleType.EXCELLENT_ATTACK.value: ModuleCategory.ATTACK, 
+    ModuleType.EXCELLENT_ATTACK_PREFERRED.value: ModuleCategory.ATTACK,
     ModuleType.BASIC_PROTECTION.value: ModuleCategory.GUARDIAN,
     ModuleType.HIGH_PERFORMANCE_PROTECTION.value: ModuleCategory.GUARDIAN,
     ModuleType.EXCELLENT_PROTECTION.value: ModuleCategory.GUARDIAN,
+    ModuleType.EXCELLENT_PROTECTION_PREFERRED.value: ModuleCategory.GUARDIAN,
     ModuleType.BASIC_HEALING.value: ModuleCategory.SUPPORT,
     ModuleType.HIGH_PERFORMANCE_HEALING.value: ModuleCategory.SUPPORT,
     ModuleType.EXCELLENT_HEALING.value: ModuleCategory.SUPPORT,
+    ModuleType.EXCELLENT_HEALING_PREFERRED.value: ModuleCategory.SUPPORT,
 }
 
 # 属性阈值和效果等级
