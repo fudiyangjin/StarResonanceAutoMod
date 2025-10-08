@@ -201,19 +201,24 @@ else:
     print("⚠️ 未检测到CUDA, 使用CPU版本")
 
 # 可选启用 OpenCL：
-opencl_conf = find_opencl()
-use_opencl = opencl_conf is not None
-if use_opencl:
-    if is_windows:
-        extra_compile_args.append("/DUSE_OPENCL")
-    else:
-        extra_compile_args.append("-DUSE_OPENCL")
-    include_dirs.append(opencl_conf['include'])
-    library_dirs.append(opencl_conf['libdir'])
-    libraries.append('OpenCL')
-    print("✅ 启用OpenCL支持")
+force_no_opencl = os.environ.get('FORCE_NO_OPENCL') == '1' or force_cpu
+if force_no_opencl:
+    use_opencl = False
+    print("禁用OpenCL支持")
 else:
-    print("未启用OpenCL(未找到构建依赖), 将仅提供CUDA/CPU")
+    opencl_conf = find_opencl()
+    use_opencl = opencl_conf is not None
+    if use_opencl:
+        if is_windows:
+            extra_compile_args.append("/DUSE_OPENCL")
+        else:
+            extra_compile_args.append("-DUSE_OPENCL")
+        include_dirs.append(opencl_conf['include'])
+        library_dirs.append(opencl_conf['libdir'])
+        libraries.append('OpenCL')
+        print("✅ 启用OpenCL支持")
+    else:
+        print("未启用OpenCL(未找到构建依赖), 将仅提供CUDA/CPU")
 
 # 定义扩展模块
 ext_modules = [

@@ -2,9 +2,8 @@
 
 #ifdef USE_OPENCL
 #ifndef CL_TARGET_OPENCL_VERSION
-#define CL_TARGET_OPENCL_VERSION 120
+#define CL_TARGET_OPENCL_VERSION 300
 #endif
-#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #include <CL/cl.h>
 #include <cstdio>
 #include <vector>
@@ -13,6 +12,18 @@
 #include <cstring>
 #include <queue>
 #include <limits>
+
+struct GpuConfigOpenCL {
+    size_t max_work_group_size;        // 最大工作组大小
+    cl_uint compute_units;              // 计算单元数量
+    cl_ulong global_memory;             // 全局内存大小
+    size_t max_work_item_sizes[3];     // 最大工作项大小
+    
+    // 计算得出的优化参数
+    size_t optimal_local_size;         // 优化的本地大小（block_size）
+    size_t optimal_global_size;        // 优化的全局大小（grid_size * block_size）
+    unsigned long long optimal_batch_size;  // 优化的批处理大小
+};
 
 static bool SelectDiscreteGpu(cl_platform_id &out_platform,
                               cl_device_id &out_device) {
@@ -54,6 +65,75 @@ extern "C" int TestOpenCL() {
     return SelectDiscreteGpu(platform, device) ? 1 : 0;
 }
 
+static bool GetGpuConfigOpenCL(cl_device_id device, GpuConfigOpenCL* config) {
+    if (!device || !config) return false;
+    
+    cl_int err = CL_SUCCESS;
+    
+    // 查询最大工作组大小
+    err = clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, 
+                          sizeof(size_t), &config->max_work_group_size, nullptr);
+    if (err != CL_SUCCESS) return false;
+    
+    // 查询计算单元数量
+    err = clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, 
+                          sizeof(cl_uint), &config->compute_units, nullptr);
+    if (err != CL_SUCCESS) return false;
+    
+    // 查询全局内存大小
+    err = clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, 
+                          sizeof(cl_ulong), &config->global_memory, nullptr);
+    if (err != CL_SUCCESS) return false;
+    
+    // 查询最大工作项大小
+    err = clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, 
+                          sizeof(size_t) * 3, config->max_work_item_sizes, nullptr);
+    if (err != CL_SUCCESS) return false;
+    
+    return true;
+}
+
+static void CalculateOptimalParamsOpenCL(GpuConfigOpenCL* config, unsigned long long total_combinations) {
+    if (!config) return;
+    
+    // 设置优化的本地工作组大小
+    config->optimal_local_size = 512;
+    
+    // 确保不超过硬件限制
+    if (config->optimal_local_size > config->max_work_group_size) {
+        config->optimal_local_size = config->max_work_group_size;
+    }
+    
+    // 计算优化的全局工作大小
+    size_t estimated_max_work_groups = config->compute_units * 16;
+    size_t max_global_threads = estimated_max_work_groups * 2 * config->optimal_local_size;
+    
+    // 基于实际工作负载调整
+    if (total_combinations < max_global_threads) {
+        config->optimal_global_size = ((total_combinations + config->optimal_local_size - 1) 
+                                       / config->optimal_local_size) * config->optimal_local_size;
+    } else {
+        config->optimal_global_size = max_global_threads;
+    }
+    
+    // 计算优化的批处理大小
+    size_t available_memory = (size_t)(config->global_memory * 0.5);
+    unsigned long long memory_limited_batch = available_memory / (sizeof(int) + sizeof(unsigned long long));
+    
+    // 基于计算能力的批处理大小
+    unsigned long long compute_limited_batch = max_global_threads * 3000ULL;
+    
+    // 取较小值，但至少 10 万，最大 2250 万
+    config->optimal_batch_size = memory_limited_batch < compute_limited_batch ? 
+                                  memory_limited_batch : compute_limited_batch;
+    if (config->optimal_batch_size < 100000ULL) {
+        config->optimal_batch_size = 100000ULL;
+    }
+    if (config->optimal_batch_size > 22500000ULL) {
+        config->optimal_batch_size = 22500000ULL;
+    }
+}
+
 extern "C" int GpuStrategyEnumerationOpenCL(
     const int *module_attr_ids,
     const int *module_attr_values,
@@ -80,8 +160,37 @@ extern "C" int GpuStrategyEnumerationOpenCL(
     cl_int err = CL_SUCCESS;
     cl_context ctx = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
     if (!ctx || err != CL_SUCCESS) return 0;
-    cl_command_queue q = clCreateCommandQueue(ctx, device, 0, &err);
+    cl_command_queue q = clCreateCommandQueueWithProperties(ctx, device, nullptr, &err);
     if (!q || err != CL_SUCCESS) { clReleaseContext(ctx); return 0; }
+
+    // 获取 GPU 配置
+    GpuConfigOpenCL gpu_config;
+    if (!GetGpuConfigOpenCL(device, &gpu_config)) {
+        clReleaseCommandQueue(q);
+        clReleaseContext(ctx);
+        return 0;
+    }
+
+    auto comb_count = [](unsigned long long n, unsigned long long r) -> unsigned long long {
+        if (r > n) return 0ULL; 
+        if (r == 0ULL || r == n) return 1ULL; 
+        if (r > n - r) r = n - r;
+        unsigned long long res = 1ULL; 
+        for (unsigned long long i = 0; i < r; ++i) res = (res * (n - i)) / (i + 1ULL); 
+        return res;
+    };
+    unsigned long long total_combinations = comb_count((unsigned long long)module_count, 4ULL);
+    CalculateOptimalParamsOpenCL(&gpu_config, total_combinations);
+
+    // 打印配置信息
+    printf("OpenCL GPU Configuration:\n");
+    printf("  Compute Units: %u\n", gpu_config.compute_units);
+    printf("  Max Work Group Size: %zu\n", gpu_config.max_work_group_size);
+    printf("  Global Memory: %.1f MB\n", (double)gpu_config.global_memory / (1024 * 1024));
+    printf("Optimal Parameters:\n");
+    printf("  Local Size: %zu\n", gpu_config.optimal_local_size);
+    printf("  Global Size: %zu\n", gpu_config.optimal_global_size);
+    printf("  Batch Size: %llu\n", gpu_config.optimal_batch_size);
 
     const char *kernel_src = R"CLC(
 #define RADIX_BINS 256
@@ -99,9 +208,10 @@ __constant int TOTAL_ATTR_POWER_VALUES[121] = {
 };
 
 inline int is_special_id(int id) {
+    #pragma unroll
     for (int i = 0; i < 8; ++i) if (SPECIAL_ATTRS[i] == id) return 1; return 0;
 }
-inline int in_set(__global const int *arr, int n, int v) {
+inline int in_set(__global const int * restrict arr, int n, int v) {
     for (int i = 0; i < n; ++i) if (arr[i] == v) return 1; return 0;
 }
 
@@ -137,23 +247,23 @@ int next_combination(uint n, uint r, uint comb[4]) {
 }
 
 __kernel void score_range(
-    __global const int *module_attr_ids,
-    __global const int *module_attr_values,
-    __global const int *module_attr_counts,
-    __global const int *module_offsets,
+    __global const int * restrict module_attr_ids,
+    __global const int * restrict module_attr_values,
+    __global const int * restrict module_attr_counts,
+    __global const int * restrict module_offsets,
     int module_count,
     int total_attrs,
-    __global const int *target_attrs,
+    __global const int * restrict target_attrs,
     int target_count,
-    __global const int *exclude_attrs,
+    __global const int * restrict exclude_attrs,
     int exclude_count,
-    __global const int *min_attr_ids,
-    __global const int *min_attr_values,
+    __global const int * restrict min_attr_ids,
+    __global const int * restrict min_attr_values,
     int min_attr_count,
     ulong range_start,
     ulong range_len,
-    __global int *out_scores,
-    __global ulong *out_indices) {
+    __global int * restrict out_scores,
+    __global ulong * restrict out_indices) {
     ulong gid = (ulong)get_global_id(0);
     ulong total_threads = (ulong)get_global_size(0);
     
@@ -177,22 +287,26 @@ __kernel void score_range(
         int attr_cnt = 0;
         int total_attr_value = 0;
         
+        #pragma unroll
         for (int t = 0; t < 4; ++t) {
             int mi = (int)comb[t];
             int off = module_offsets[mi];
             int cnt = module_attr_counts[mi];
-            int limit = (cnt < 3) ? cnt : 3;
             
-            for (int k = 0; k < limit; ++k) {
-                int aid = module_attr_ids[off + k];
-                int aval = module_attr_values[off + k];
-                total_attr_value += aval;
-                int found = -1;
-                for (int u = 0; u < attr_cnt; ++u) { 
-                    if (attr_ids[u] == aid) { found = u; break; } 
+            #pragma unroll
+            for (int k = 0; k < 3; ++k) {
+                if (k < cnt) {
+                    int aid = module_attr_ids[off + k];
+                    int aval = module_attr_values[off + k];
+                    total_attr_value += aval;
+                    int found = -1;
+                    #pragma unroll
+                    for (int u = 0; u < 12; ++u) { 
+                        if (u < attr_cnt && attr_ids[u] == aid) { found = u; break; } 
+                    }
+                    if (found >= 0) { attr_vals[found] += aval; }
+                    else if (attr_cnt < 12) { attr_ids[attr_cnt] = aid; attr_vals[attr_cnt] = aval; attr_cnt++; }
                 }
-                if (found >= 0) { attr_vals[found] += aval; }
-                else if (attr_cnt < 12) { attr_ids[attr_cnt] = aid; attr_vals[attr_cnt] = aval; attr_cnt++; }
             }
         }
 
@@ -201,7 +315,10 @@ __kernel void score_range(
             int req_id = min_attr_ids[m];
             int req_v = min_attr_values[m];
             int sum_v = 0, ok = 0;
-            for (int u = 0; u < attr_cnt; ++u) if (attr_ids[u] == req_id) { sum_v = attr_vals[u]; ok = 1; break; }
+            #pragma unroll
+            for (int u = 0; u < 12; ++u) {
+                if (u < attr_cnt && attr_ids[u] == req_id) { sum_v = attr_vals[u]; ok = 1; break; }
+            }
             if (!ok || sum_v < req_v) {
                 pass_min_filter = 0;
                 break;
@@ -218,16 +335,20 @@ __kernel void score_range(
         }
 
         int threshold_power = 0;
-        for (int i = 0; i < attr_cnt; ++i) {
-            int aval = attr_vals[i];
-            int aid = attr_ids[i];
-            int lvl = 0; 
-            for (int L = 0; L < 6; ++L) { if (aval >= ATTR_THRESHOLDS[L]) lvl = L + 1; else break; }
-            if (lvl > 0) {
-                int base = is_special_id(aid) ? SPECIAL_POWER_VALUES[lvl - 1] : BASIC_POWER_VALUES[lvl - 1];
-                if (target_count > 0 && in_set(target_attrs, target_count, aid)) threshold_power += base * 2;
-                else if (exclude_count > 0 && in_set(exclude_attrs, exclude_count, aid)) threshold_power += 0;
-                else threshold_power += base;
+        #pragma unroll
+        for (int i = 0; i < 12; ++i) {
+            if (i < attr_cnt) {
+                int aval = attr_vals[i];
+                int aid = attr_ids[i];
+                int lvl = 0;
+                #pragma unroll
+                for (int L = 0; L < 6; ++L) { if (aval >= ATTR_THRESHOLDS[L]) lvl = L + 1; else break; }
+                if (lvl > 0) {
+                    int base = is_special_id(aid) ? SPECIAL_POWER_VALUES[lvl - 1] : BASIC_POWER_VALUES[lvl - 1];
+                    if (target_count > 0 && in_set(target_attrs, target_count, aid)) threshold_power += base * 2;
+                    else if (exclude_count > 0 && in_set(exclude_attrs, exclude_count, aid)) threshold_power += 0;
+                    else threshold_power += base;
+                }
             }
         }
         int idx_total = total_attr_value > 120 ? 120 : total_attr_value;
@@ -242,12 +363,12 @@ __kernel void score_range(
 }
 
 __kernel void histogram_byte_radix(
-    __global const int *scores,
+    __global const int * restrict scores,
     ulong n,
     uint prefix_mask,
     uint prefix_value,
     int byte_idx,
-    __global uint *g_hist,
+    __global uint * restrict g_hist,
     __local uint *s_hist) {
     size_t lid = get_local_id(0);
     size_t lsz = get_local_size(0);
@@ -277,10 +398,10 @@ __kernel void histogram_byte_radix(
 }
 
 __kernel void flag_scores_by_threshold(
-    __global const int *scores,
+    __global const int * restrict scores,
     ulong n,
     int threshold,
-    __global uchar *flags) {
+    __global uchar * restrict flags) {
     size_t gid = get_global_id(0);
     size_t gsz = get_global_size(0);
     for (ulong i = gid; i < n; i += gsz) {
@@ -290,13 +411,13 @@ __kernel void flag_scores_by_threshold(
 }
 
 __kernel void compact_selected(
-    __global const int *scores,
-    __global const ulong *indices,
-    __global const uchar *flags,
+    __global const int * restrict scores,
+    __global const ulong * restrict indices,
+    __global const uchar * restrict flags,
     ulong n,
-    __global int *out_scores,
-    __global ulong *out_indices,
-    __global uint *out_count) {
+    __global int * restrict out_scores,
+    __global ulong * restrict out_indices,
+    __global uint * restrict out_count) {
     size_t gid = get_global_id(0);
     size_t gsz = get_global_size(0);
     for (ulong i = gid; i < n; i += gsz) {
@@ -317,7 +438,7 @@ __kernel void compact_selected(
         clReleaseContext(ctx); 
         return 0; 
     }
-    err = clBuildProgram(prog, 1, &device, "-cl-std=CL1.2 -cl-mad-enable -cl-fast-relaxed-math -cl-finite-math-only", nullptr, nullptr);
+    err = clBuildProgram(prog, 1, &device, "-cl-std=CL3.0 -cl-mad-enable -cl-fast-relaxed-math -cl-finite-math-only", nullptr, nullptr);
     if (err != CL_SUCCESS) {
         size_t log_size = 0; clGetProgramBuildInfo(prog, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &log_size);
         std::vector<char> log(log_size + 1, 0);
@@ -371,15 +492,6 @@ __kernel void compact_selected(
     cl_mem d_min_ids = min_attr_count > 0 ? clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * min_attr_count, (void*)min_attr_ids, &err) : nullptr;
     cl_mem d_min_vals = min_attr_count > 0 ? clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * min_attr_count, (void*)min_attr_values, &err) : nullptr;
 
-    auto comb_count = [](unsigned long long n, unsigned long long r) -> unsigned long long {
-        if (r > n) return 0ULL; 
-        if (r == 0ULL || r == n) return 1ULL; 
-        if (r > n - r) r = n - r;
-        unsigned long long res = 1ULL; 
-        for (unsigned long long i = 0; i < r; ++i) res = (res * (n - i)) / (i + 1ULL); 
-        return res;
-    };
-    unsigned long long total_combinations = comb_count((unsigned long long)module_count, 4ULL);
     if (total_combinations == 0ULL) {
         if (d_min_vals) clReleaseMemObject(d_min_vals);
         if (d_min_ids) clReleaseMemObject(d_min_ids);
@@ -399,10 +511,9 @@ __kernel void compact_selected(
     struct Item { int score; unsigned long long idx; bool operator<(const Item& o) const { return score > o.score; } };
     std::priority_queue<Item> topk;
 
-    const unsigned long long max_batch = 22500000ULL;
     unsigned long long processed = 0ULL;
     while (processed < total_combinations) {
-        unsigned long long batch = std::min(max_batch, total_combinations - processed);
+        unsigned long long batch = std::min(gpu_config.optimal_batch_size, total_combinations - processed);
         size_t outN = (size_t)batch;
 
         cl_mem d_scores = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(int) * outN, nullptr, &err);
@@ -429,12 +540,12 @@ __kernel void compact_selected(
         clSetKernelArg(kernel, arg++, sizeof(cl_mem), &d_scores);
         clSetKernelArg(kernel, arg++, sizeof(cl_mem), &d_indices);
 
-        size_t lsz = 512;
-        size_t target_threads = 1340000;
+        size_t lsz = gpu_config.optimal_local_size;
+        size_t target_threads = gpu_config.optimal_global_size;
         if (target_threads > (size_t)batch) {
-            target_threads = (size_t)batch;
+            target_threads = ((size_t)batch + lsz - 1) / lsz * lsz;
         }
-        size_t gsz = ((target_threads + lsz - 1) / lsz) * lsz;
+        size_t gsz = target_threads;
         
         err = clEnqueueNDRangeKernel(q, kernel, 1, nullptr, &gsz, &lsz, 0, nullptr, nullptr);
         if (err != CL_SUCCESS) { 
@@ -630,9 +741,12 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumerationOpenCL(
     int max_workers) {
 #ifdef USE_OPENCL
     if (!TestOpenCL()) {
+        printf("OpenCL not available, using CPU optimized version\n");
         return StrategyEnumeration(modules, target_attributes, exclude_attributes,
                                    min_attr_sum_requirements, max_solutions, max_workers);
     }
+
+    printf("OpenCL GPU acceleration enabled - all calculations performed on GPU\n");
 
     std::vector<int> all_attr_ids;
     std::vector<int> all_attr_values;
