@@ -4,6 +4,7 @@
 
 import logging
 import os
+import sys
 from datetime import datetime
 
 
@@ -24,10 +25,11 @@ def setup_logging(level=logging.INFO, debug_mode=False):
         level = logging.DEBUG
     
     # 创建日志目录
-    log_dir = "logs"
+    base_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(base_dir, "logs")
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    
+
     # 生成日志文件名（包含时间戳）
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"star_resonance_{timestamp}.log")
