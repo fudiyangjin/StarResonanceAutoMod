@@ -22,6 +22,8 @@ from cpp_extension.module_optimizer_cpp import (
     ModuleSolution as CppModuleSolution,
     strategy_enumeration_cpp,
     strategy_enumeration_cuda_cpp,
+    strategy_enumeration_gpu_cpp,
+    strategy_enumeration_opencl_cpp,
     test_cuda,
     optimize_modules_cpp
 )
@@ -382,7 +384,7 @@ class ModuleOptimizer:
                 if aid is not None:
                     min_attr_id_requirements[aid] = int(val)
 
-        cpp_solutions = strategy_enumeration_cuda_cpp(
+        cpp_solutions = strategy_enumeration_gpu_cpp(
             cpp_modules,
             target_attrs_set,
             exclude_attrs_set,
