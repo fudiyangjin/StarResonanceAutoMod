@@ -1,5 +1,7 @@
 # 星痕共鸣模组全自动筛选工具
 
+[English Version](README_EN.md)
+
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-brightgreen.svg)](https://www.gnu.org/licenses/agpl-3.0.txt)
 
 一款专为《星痕共鸣》游戏开发的星痕共鸣模组智能筛选工具，通过网络数据包分析自动获取游戏中的模组数据，并使用 C++优化的算法计算最优模组搭配方案。
