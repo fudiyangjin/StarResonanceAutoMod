@@ -14,7 +14,8 @@ import psutil
 from module_types import (
     ModuleInfo, ModuleType, ModulePart, ModuleAttrType, ModuleCategory,
     MODULE_CATEGORY_MAP, ATTR_THRESHOLDS, BASIC_ATTR_POWER_MAP, SPECIAL_ATTR_POWER_MAP,
-    TOTAL_ATTR_POWER_MAP, BASIC_ATTR_IDS, SPECIAL_ATTR_IDS, ATTR_NAME_TYPE_MAP, MODULE_ATTR_IDS
+    TOTAL_ATTR_POWER_MAP, BASIC_ATTR_IDS, SPECIAL_ATTR_IDS, ATTR_NAME_TYPE_MAP, MODULE_ATTR_IDS,
+    to_english_attr, to_english_module, CATEGORY_CN_TO_EN
 )
 from cpp_extension.module_optimizer_cpp import (
     ModulePart as CppModulePart,
@@ -56,7 +57,7 @@ class ModuleSolution:
 class ModuleOptimizer:
     """模组搭配优化器"""
     
-    def __init__(self, target_attributes: List[str] = None, exclude_attributes: List[str] = None, min_attr_sum_requirements: dict | None = None):
+    def __init__(self, target_attributes: List[str] = None, exclude_attributes: List[str] = None, min_attr_sum_requirements: dict | None = None, lang: str = 'zh'):
         """初始化模组搭配优化器
         
         Args:
@@ -68,12 +69,16 @@ class ModuleOptimizer:
         self.target_attributes = target_attributes or []
         self.exclude_attributes = exclude_attributes or []
         self.min_attr_sum_requirements = min_attr_sum_requirements or {}
+        self.lang = (lang or 'zh').lower()
         
         self.local_search_iterations = 50  # 局部搜索迭代次数
         self.max_attempts = 20             # 贪心+局部搜索最大尝试次数
         self.max_solutions = 100           # 最大解数量
         self.max_workers = 8               # 最大线程数
         self.enumeration_num = 400         # 并行策略中最大枚举模组数
+    
+    def _t(self, zh: str, en: str) -> str:
+        return en if self.lang == 'en' else zh
     
     def _get_current_log_file(self) -> Optional[str]:
         """获取当前日志文件路径
@@ -126,9 +131,9 @@ class ModuleOptimizer:
 
         cuda_available = test_cuda()
         if cuda_available:
-            self.logger.info("可以使用GPU加速")
+            self.logger.info(self._t("可以使用GPU加速", "GPU acceleration available"))
         else:
-            self.logger.info("GPU加速不可用 - 将使用CPU模式")
+            self.logger.info(self._t("GPU加速不可用 - 将使用CPU模式", "GPU acceleration unavailable - falling back to CPU"))
         
         return cuda_available
     
@@ -182,8 +187,12 @@ class ModuleOptimizer:
         
         candidate_modules = list(set(candidate_modules))
         
-        self.logger.info(f"筛选后模组数量: candidate_modules={len(candidate_modules)} top_modules={len(top_modules)}")
-        self.logger.info(f"涉及的属性类型: {list(attr_modules.keys())}")
+        self.logger.info(self._t(
+            f"筛选后模组数量: candidate_modules={len(candidate_modules)} top_modules={len(top_modules)}",
+            f"After prefilter: candidate_modules={len(candidate_modules)} top_modules={len(top_modules)}"
+        ))
+        attrs_disp = list(attr_modules.keys()) if self.lang != 'en' else [to_english_attr(a) for a in attr_modules.keys()]
+        self.logger.info(self._t(f"涉及的属性类型: {list(attr_modules.keys())}", f"Involved attributes: {attrs_disp}"))
         return top_modules, candidate_modules
     
     def _prefilter_modules_by_total_scores(self, modules: List[ModuleInfo], num: int) -> List[ModuleInfo]:
@@ -224,21 +233,22 @@ class ModuleOptimizer:
         Returns:
             List[ModuleSolution]: 最优解列表
         """
-        self.logger.info(f"开始优化{category.value}类型模组搭配, cpu_count={self.get_cpu_count()}")
+        cat_disp = category.value if self.lang != 'en' else CATEGORY_CN_TO_EN.get(category.value, category.value)
+        self.logger.info(self._t(f"开始优化{category.value}类型模组搭配, cpu_count={self.get_cpu_count()}", f"Start optimizing {cat_disp} modules, cpu_count={self.get_cpu_count()}"))
         
         # 过滤指定类型的模组
         if category == ModuleCategory.ALL:
             filtered_modules = modules
-            self.logger.info(f"使用全部模组，共{len(filtered_modules)}个")
+            self.logger.info(self._t(f"使用全部模组，共{len(filtered_modules)}个", f"Using all modules, total={len(filtered_modules)}"))
         else:
             filtered_modules = [
                 module for module in modules 
                 if self.get_module_category(module) == category
             ]
-            self.logger.info(f"找到{len(filtered_modules)}个{category.value}类型模组")
+            self.logger.info(self._t(f"找到{len(filtered_modules)}个{category.value}类型模组", f"Found {len(filtered_modules)} {cat_disp} modules"))
         
         if len(filtered_modules) < 4:
-            self.logger.warning(f"{category.value}类型模组数量不足4个, 无法形成完整搭配")
+            self.logger.warning(self._t(f"{category.value}类型模组数量不足4个, 无法形成完整搭配", f"Not enough {cat_disp} modules (<4) to form a combination"))
             return []
         
         # 筛选模组
@@ -246,7 +256,7 @@ class ModuleOptimizer:
         greedy_solutions = []
         
         if len(candidate_modules) > self.enumeration_num:
-            self.logger.info("并行策略开始")
+            self.logger.info(self._t("并行策略开始", "Parallel strategies start"))
             num_processes = min(2, mp.cpu_count())
 
             # 创建进程池, spawn兼容打包环境
@@ -274,7 +284,7 @@ class ModuleOptimizer:
         if self.target_attributes or self.min_attr_sum_requirements:
             result = self._restore_original_scores(result)
         
-        self.logger.info(f"优化完成，返回{len(result)}个最优解")
+        self.logger.info(self._t(f"优化完成，返回{len(result)}个最优解", f"Optimization finished, returning {len(result)} best solutions"))
         
         return result
     
@@ -307,32 +317,33 @@ class ModuleOptimizer:
         Returns:
             List[ModuleSolution]: 最优解列表
         """
-        self.logger.info(f"开始优化{category.value}类型模组搭配 cpu_count={self.get_cpu_count()}")
+        cat_disp = category.value if self.lang != 'en' else CATEGORY_CN_TO_EN.get(category.value, category.value)
+        self.logger.info(self._t(f"开始优化{category.value}类型模组搭配 cpu_count={self.get_cpu_count()}", f"Start optimizing {cat_disp} modules cpu_count={self.get_cpu_count()}"))
         
         # 过滤指定类型的模组
         if category == ModuleCategory.ALL:
             filtered_modules = modules
-            self.logger.info(f"使用全部模组，共{len(filtered_modules)}个")
+            self.logger.info(self._t(f"使用全部模组，共{len(filtered_modules)}个", f"Using all modules, total={len(filtered_modules)}"))
         else:
             filtered_modules = [
                 module for module in modules 
                 if self.get_module_category(module) == category
             ]
-            self.logger.info(f"找到{len(filtered_modules)}个{category.value}类型模组")
+            self.logger.info(self._t(f"找到{len(filtered_modules)}个{category.value}类型模组", f"Found {len(filtered_modules)} {cat_disp} modules"))
         
         if len(filtered_modules) < 4:
-            self.logger.warning(f"{category.value}类型模组数量不足4个, 无法形成完整搭配")
+            self.logger.warning(self._t(f"{category.value}类型模组数量不足4个, 无法形成完整搭配", f"Not enough {cat_disp} modules (<4) to form a combination"))
             return []
         
         # 超过800/1000个根据总属性筛下
         if self.check_cuda_availability():
             if len(filtered_modules) > 1000:
                 filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 1000)
-                self.logger.info(f"枚举数量超过1000, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
+                self.logger.info(self._t(f"枚举数量超过1000, 进行筛选, 筛选后模组数量: {len(filtered_modules)}", f"Enumeration exceeds 1000, prefilter applied: {len(filtered_modules)} remain"))
         else:
             if len(filtered_modules) > 800:
                 filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 800)
-                self.logger.info(f"枚举数量超过800, 进行筛选, 筛选后模组数量: {len(filtered_modules)}")
+                self.logger.info(self._t(f"枚举数量超过800, 进行筛选, 筛选后模组数量: {len(filtered_modules)}", f"Enumeration exceeds 800, prefilter applied: {len(filtered_modules)} remain"))
         
         enum_solutions = self._strategy_enumeration(filtered_modules)
         unique_solutions = self._complete_deduplicate(enum_solutions)
@@ -345,7 +356,7 @@ class ModuleOptimizer:
         if self.target_attributes:
             result = self._restore_original_scores(result)
         
-        self.logger.info(f"优化完成，返回{len(result)}个最优解")
+        self.logger.info(self._t(f"优化完成，返回{len(result)}个最优解", f"Optimization finished, returning {len(result)} best solutions"))
         
         return result
     
@@ -566,29 +577,59 @@ class ModuleOptimizer:
         Note:
             同时输出到控制台和日志文件
         """
-        print(f"\n=== 第{rank}名搭配 ===")
-        self._log_result(f"\n=== 第{rank}名搭配 ===")
+        if self.lang == 'en':
+            print(f"\n=== Rank #{rank} Solution ===")
+            self._log_result(f"\n=== Rank #{rank} Solution ===")
+        else:
+            print(f"\n=== 第{rank}名搭配 ===")
+            self._log_result(f"\n=== 第{rank}名搭配 ===")
         
         total_value = sum(solution.attr_breakdown.values())
         
-        print(f"总属性值: {total_value}")
-        self._log_result(f"总属性值: {total_value}")
+        if self.lang == 'en':
+            print(f"Total Attribute Value: {total_value}")
+            self._log_result(f"Total Attribute Value: {total_value}")
+        else:
+            print(f"总属性值: {total_value}")
+            self._log_result(f"总属性值: {total_value}")
         
-        print(f"战斗力: {solution.score:.2f}")
-        self._log_result(f"战斗力: {solution.score:.2f}")
+        if self.lang == 'en':
+            print(f"Score: {solution.score:.2f}")
+            self._log_result(f"Score: {solution.score:.2f}")
+        else:
+            print(f"战斗力: {solution.score:.2f}")
+            self._log_result(f"战斗力: {solution.score:.2f}")
         
-        print("\n模组列表:")
-        self._log_result("\n模组列表:")
+        if self.lang == 'en':
+            print("\nModules:")
+            self._log_result("\nModules:")
+        else:
+            print("\n模组列表:")
+            self._log_result("\n模组列表:")
         for i, module in enumerate(solution.modules, 1):
-            parts_str = ", ".join([f"{p.name}+{p.value}" for p in module.parts])
-            print(f"  {i}. {module.name} (品质{module.quality}) - {parts_str}")
-            self._log_result(f"  {i}. {module.name} (品质{module.quality}) - {parts_str}")
+            if self.lang == 'en':
+                parts_str = ", ".join([f"{to_english_attr(p.name)}+{p.value}" for p in module.parts])
+                name_disp = to_english_module(module.config_id, module.name)
+                print(f"  {i}. {name_disp} (Quality {module.quality}) - {parts_str}")
+                self._log_result(f"  {i}. {name_disp} (Quality {module.quality}) - {parts_str}")
+            else:
+                parts_str = ", ".join([f"{p.name}+{p.value}" for p in module.parts])
+                print(f"  {i}. {module.name} (品质{module.quality}) - {parts_str}")
+                self._log_result(f"  {i}. {module.name} (品质{module.quality}) - {parts_str}")
         
-        print("\n属性分布:")
-        self._log_result("\n属性分布:")
+        if self.lang == 'en':
+            print("\nAttribute Breakdown:")
+            self._log_result("\nAttribute Breakdown:")
+        else:
+            print("\n属性分布:")
+            self._log_result("\n属性分布:")
         for attr_name, value in sorted(solution.attr_breakdown.items()):
-            print(f"  {attr_name}: +{value}")
-            self._log_result(f"  {attr_name}: +{value}")
+            if self.lang == 'en':
+                print(f"  {to_english_attr(attr_name)}: +{value}")
+                self._log_result(f"  {to_english_attr(attr_name)}: +{value}")
+            else:
+                print(f"  {attr_name}: +{value}")
+                self._log_result(f"  {attr_name}: +{value}")
     
     def optimize_and_display(self, 
                            modules: List[ModuleInfo], 
@@ -607,10 +648,13 @@ class ModuleOptimizer:
         """
         print(f"\n{'='*50}")
         self._log_result(f"\n{'='*50}")
-        
-        print(f"模组搭配优化 - {category.value}类型")
-        self._log_result(f"模组搭配优化 - {category.value}类型")
-        
+        cat_disp = category.value if self.lang != 'en' else CATEGORY_CN_TO_EN.get(category.value, category.value)
+        if self.lang == 'en':
+            print(f"Module Optimization - {cat_disp}")
+            self._log_result(f"Module Optimization - {cat_disp}")
+        else:
+            print(f"模组搭配优化 - {category.value}类型")
+            self._log_result(f"模组搭配优化 - {category.value}类型")
         print(f"{'='*50}")
         self._log_result(f"{'='*50}")
         
@@ -620,12 +664,20 @@ class ModuleOptimizer:
             optimal_solutions = self.optimize_modules(modules, category, top_n)
         
         if not optimal_solutions:
-            print(f"未找到{category.value}类型的有效搭配")
-            self._log_result(f"未找到{category.value}类型的有效搭配")
+            if self.lang == 'en':
+                print(f"No valid combinations found for {cat_disp}")
+                self._log_result(f"No valid combinations found for {cat_disp}")
+            else:
+                print(f"未找到{category.value}类型的有效搭配")
+                self._log_result(f"未找到{category.value}类型的有效搭配")
             return
         
-        print(f"\n找到{len(optimal_solutions)}个最优搭配:")
-        self._log_result(f"\n找到{len(optimal_solutions)}个最优搭配:")
+        if self.lang == 'en':
+            print(f"\nTop combinations found: {len(optimal_solutions)}")
+            self._log_result(f"\nTop combinations found: {len(optimal_solutions)}")
+        else:
+            print(f"\n找到{len(optimal_solutions)}个最优搭配:")
+            self._log_result(f"\n找到{len(optimal_solutions)}个最优搭配:")
         
         for i, solution in enumerate(optimal_solutions, 1):
             self.print_solution_details(solution, i)
@@ -633,18 +685,23 @@ class ModuleOptimizer:
         # 显示统计信息
         print(f"\n{'='*50}")
         self._log_result(f"\n{'='*50}")
-        
-        print("统计信息:")
-        self._log_result("统计信息:")
-        
-        print(f"总模组数量: {len(modules)}")
-        self._log_result(f"总模组数量: {len(modules)}")
-        
-        print(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
-        self._log_result(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
-        
-        print(f"最高战斗力: {optimal_solutions[0].score:.2f}")
-        self._log_result(f"最高战斗力: {optimal_solutions[0].score:.2f}")
-        
+        if self.lang == 'en':
+            print("Statistics:")
+            self._log_result("Statistics:")
+            print(f"Total modules: {len(modules)}")
+            self._log_result(f"Total modules: {len(modules)}")
+            print(f"{cat_disp} modules: {len([m for m in modules if self.get_module_category(m) == category])}")
+            self._log_result(f"{cat_disp} modules: {len([m for m in modules if self.get_module_category(m) == category])}")
+            print(f"Highest score: {optimal_solutions[0].score:.2f}")
+            self._log_result(f"Highest score: {optimal_solutions[0].score:.2f}")
+        else:
+            print("统计信息:")
+            self._log_result("统计信息:")
+            print(f"总模组数量: {len(modules)}")
+            self._log_result(f"总模组数量: {len(modules)}")
+            print(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
+            self._log_result(f"{category.value}类型模组: {len([m for m in modules if self.get_module_category(m) == category])}")
+            print(f"最高战斗力: {optimal_solutions[0].score:.2f}")
+            self._log_result(f"最高战斗力: {optimal_solutions[0].score:.2f}")
         print(f"{'='*50}")
         self._log_result(f"{'='*50}")

@@ -97,6 +97,46 @@ MODULE_ATTR_NAMES = {
     ModuleAttrType.EXTREME_DESPERATE_GUARDIAN.value: "极-绝境守护",
 }
 
+# 英文显示名称映射
+MODULE_NAMES_EN: Dict[int, str] = {
+    ModuleType.BASIC_ATTACK.value: "Basic Attack Module",
+    ModuleType.HIGH_PERFORMANCE_ATTACK.value: "Advanced Attack Module",
+    ModuleType.EXCELLENT_ATTACK.value: "Excellent Attack Module",
+    ModuleType.EXCELLENT_ATTACK_PREFERRED.value: "Excellent Attack Module Preferred",
+    ModuleType.BASIC_HEALING.value: "Basic Support Module",
+    ModuleType.HIGH_PERFORMANCE_HEALING.value: "Advanced Support Module",
+    ModuleType.EXCELLENT_HEALING.value: "Excellent Support Module",
+    ModuleType.EXCELLENT_HEALING_PREFERRED.value: "Excellent Support Module Preferred",
+    ModuleType.BASIC_PROTECTION.value: "Basic Guard Module",
+    ModuleType.HIGH_PERFORMANCE_PROTECTION.value: "Advanced Guard Module",
+    ModuleType.EXCELLENT_PROTECTION.value: "Excellent Guard Module",
+    ModuleType.EXCELLENT_PROTECTION_PREFERRED.value: "Excellent Guard Module Preferred",
+}
+
+MODULE_ATTR_NAMES_EN: Dict[int, str] = {
+    ModuleAttrType.STRENGTH_BOOST.value: "Strength Boost",
+    ModuleAttrType.AGILITY_BOOST.value: "Agility Boost",
+    ModuleAttrType.INTELLIGENCE_BOOST.value: "Intellect Boost",
+    ModuleAttrType.SPECIAL_ATTACK_DAMAGE.value: "Special Attack",
+    ModuleAttrType.ELITE_STRIKE.value: "Elite Strike",
+    ModuleAttrType.SPECIAL_HEALING_BOOST.value: "Healing Boost",
+    ModuleAttrType.EXPERT_HEALING_BOOST.value: "Healing Enhance",
+    ModuleAttrType.CASTING_FOCUS.value: "Cast Focus",
+    ModuleAttrType.ATTACK_SPEED_FOCUS.value: "Attack SPD",
+    ModuleAttrType.CRITICAL_FOCUS.value: "Crit Focus",
+    ModuleAttrType.LUCK_FOCUS.value: "Luck Focus",
+    ModuleAttrType.MAGIC_RESISTANCE.value: "Resistance",
+    ModuleAttrType.PHYSICAL_RESISTANCE.value: "Armor",
+    ModuleAttrType.EXTREME_DAMAGE_STACK.value: "DMG Stack",
+    ModuleAttrType.EXTREME_FLEXIBLE_MOVEMENT.value: "Agile",
+    ModuleAttrType.EXTREME_LIFE_CONVERGENCE.value: "Life Condense",
+    ModuleAttrType.EXTREME_EMERGENCY_MEASURES.value: "First Aid",
+    ModuleAttrType.EXTREME_LIFE_FLUCTUATION.value: "Life Wave",
+    ModuleAttrType.EXTREME_LIFE_DRAIN.value: "Life Steal",
+    ModuleAttrType.EXTREME_TEAM_CRIT.value: "Team Luck&Crit",
+    ModuleAttrType.EXTREME_DESPERATE_GUARDIAN.value: "Final Protection",
+}
+
 # 模组属性id名称映射
 MODULE_ATTR_IDS = {name: attr_id for attr_id, name in MODULE_ATTR_NAMES.items()}
 
@@ -115,6 +155,55 @@ MODULE_CATEGORY_MAP = {
     ModuleType.EXCELLENT_HEALING.value: ModuleCategory.SUPPORT,
     ModuleType.EXCELLENT_HEALING_PREFERRED.value: ModuleCategory.SUPPORT,
 }
+
+# 分类中英映射与属性名中英互转
+CATEGORY_EN_TO_CN: Dict[str, str] = {
+    "attack": ModuleCategory.ATTACK.value,
+    "guardian": ModuleCategory.GUARDIAN.value,
+    "support": ModuleCategory.SUPPORT.value,
+    "all": ModuleCategory.ALL.value,
+}
+
+CATEGORY_CN_TO_EN: Dict[str, str] = {
+    ModuleCategory.ATTACK.value: "Attack",
+    ModuleCategory.GUARDIAN.value: "Guardian",
+    ModuleCategory.SUPPORT.value: "Support",
+    ModuleCategory.ALL.value: "All",
+}
+
+ATTR_CN_TO_EN: Dict[str, str] = {cn: MODULE_ATTR_NAMES_EN[attr_id] for attr_id, cn in MODULE_ATTR_NAMES.items()}
+ATTR_EN_TO_CN: Dict[str, str] = {v.lower(): k for k, v in ATTR_CN_TO_EN.items()}
+
+def normalize_attribute_name(name: str) -> str:
+    """将英文/中文属性名归一化为中文；未知则原样返回"""
+    if not name:
+        return name
+    if name in MODULE_ATTR_IDS:
+        return name
+    key = name.strip().lower()
+    return ATTR_EN_TO_CN.get(key, name)
+
+def normalize_attribute_list(names: List[str] | None) -> List[str] | None:
+    if names is None:
+        return None
+    return [normalize_attribute_name(n) for n in names]
+
+def normalize_category(name: str) -> str:
+    """将英文/中文分类归一化为中文，无法识别则返回 '全部'"""
+    if not name:
+        return ModuleCategory.ALL.value
+    if name in CATEGORY_CN_TO_EN:
+        return name
+    key = name.strip().lower()
+    return CATEGORY_EN_TO_CN.get(key, ModuleCategory.ALL.value)
+
+def to_english_attr(name_cn: str) -> str:
+    """中文属性名转英文显示名；未知则返回原文"""
+    return ATTR_CN_TO_EN.get(name_cn, name_cn)
+
+def to_english_module(config_id: int, fallback_cn: str) -> str:
+    """根据 config_id 返回英文模组名；未知则返回中文回退"""
+    return MODULE_NAMES_EN.get(config_id, fallback_cn)
 
 # 属性阈值和效果等级
 ATTR_THRESHOLDS = [1, 4, 8, 12, 16, 20]
