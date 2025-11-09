@@ -8,6 +8,7 @@ import time
 import threading
 import argparse
 import os
+import sys
 import multiprocessing as mp
 from typing import Dict, List, Optional, Any
 from logging_config import setup_logging, get_logger
@@ -15,6 +16,7 @@ from module_parser import ModuleParser
 from module_types import ModuleInfo, normalize_attribute_list, normalize_attribute_name, normalize_category, to_english_attr, CATEGORY_CN_TO_EN
 from packet_capture import PacketCapture
 from network_interface_util import get_network_interfaces, select_network_interface
+from BlueProtobuf_pb2 import CharSerialize
 
 # 多进程保护
 _is_main_process = mp.current_process().name == 'MainProcess'
@@ -25,6 +27,16 @@ logger = get_logger(__name__) if _is_main_process else None
 
 def _tr(lang: str, zh: str, en: str) -> str:
     return en if (lang or '').lower() == 'en' else zh
+
+
+def get_exec_base_dir() -> str:
+    """获取可执行文件所在目录或源码所在目录"""
+    try:
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(sys.executable)
+    except Exception:
+        pass
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 class StarResonanceMonitor:
@@ -125,6 +137,16 @@ class StarResonanceMonitor:
             # 解析模组信息
             v_data = data.get('v_data')
             if v_data:
+                # 捕获后立即保存为最新离线数据
+                try:
+                    base_dir = get_exec_base_dir()
+                    vdata_path = os.path.join(base_dir, 'modules.vdata')
+                    with open(vdata_path, 'wb') as f:
+                        f.write(v_data.SerializeToString())
+                    logger.info(_tr(self.lang, f"已保存模组数据到: {vdata_path}", f"Saved module data to: {vdata_path}"))
+                except Exception as e:
+                    logger.warning(_tr(self.lang, f"保存模组数据失败: {e}", f"Failed to save module data: {e}"))
+
                 self.module_parser.parse_module_info(
                     v_data=v_data, 
                     category=self.category, 
@@ -161,6 +183,8 @@ def main():
     parser.add_argument('--enumeration-mode', '-enum', action='store_true',
                        help='启用枚举模式, 直接使用枚举运算')
     parser.add_argument('--lang', '-lang', type=str, default='zh', help='输出语言: zh 或 en (默认: zh)')
+    parser.add_argument('--load-vdata', '-lv', action='store_true',
+                       help='从可执行文件目录读取 modules.vdata, 跳过抓包直接运算')
 
     args = parser.parse_args()
     # 语言归一
@@ -184,6 +208,40 @@ def main():
     
     # 设置日志系统
     setup_logging(debug_mode=args.debug)
+
+    # --load-vdata 分支
+    if args.load_vdata:
+        base_dir = get_exec_base_dir()
+        vdata_path = os.path.join(base_dir, 'modules.vdata')
+        if not os.path.exists(vdata_path):
+            logger.error(_tr(lang, f"找不到离线数据文件: {vdata_path}", f"Offline data file not found: {vdata_path}"))
+            sys.exit(1)
+        try:
+            with open(vdata_path, 'rb') as f:
+                data_bytes = f.read()
+            char_serialize = CharSerialize()
+            char_serialize.ParseFromString(data_bytes)
+        except Exception as e:
+            logger.error(_tr(lang, f"读取或解析离线数据失败: {e}", f"Failed to read or parse offline data: {e}"))
+            sys.exit(1)
+
+        try:
+            ModuleParser(lang=lang).parse_module_info(
+                v_data=char_serialize,
+                category=category_cn,
+                attributes=attributes_cn,
+                exclude_attributes=exclude_attributes_cn,
+                match_count=args.match_count,
+                enumeration_mode=args.enumeration_mode,
+                min_attr_sum=min_attr_sum
+            )
+        except SystemExit:
+            raise
+        except Exception as e:
+            logger.error(_tr(lang, f"离线计算失败: {e}", f"Offline computation failed: {e}"))
+            sys.exit(1)
+
+        sys.exit(0)
         
     # 获取网络接口列表
     interfaces = get_network_interfaces()
