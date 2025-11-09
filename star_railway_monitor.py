@@ -286,7 +286,7 @@ def main():
     else:
         # 交互式选择
         print(_tr(lang, "星痕共鸣模组筛选器!", "Star Resonance Module Filter!"))
-        print(_tr(lang, "版本: V1.6", "Version: V1.6"))
+        print(_tr(lang, "版本: V1.6.5", "Version: V1.6.5"))
         print("GitHub: https://github.com/fudiyangjin/StarResonanceAutoMod")
         print()
         
