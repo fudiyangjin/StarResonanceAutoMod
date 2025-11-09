@@ -89,6 +89,16 @@
 .\StarResonanceAutoMod.exe -a --debug
 ```
 
+#### 🗂️ 离线直接计算
+
+程序在抓包解析到模组数据后，会自动在可执行文件目录生成并覆盖保存 `modules.vdata`（始终保留最新一份）。
+
+无需再次抓包与重新登录角色，直接使用最新的离线数据进行计算：
+
+```bash
+.\StarResonanceAutoMod.exe -enum -lv
+```
+
 ## ⚡ 枚举模式性能参考
 
 ### 🖥️ 测试环境
@@ -138,6 +148,7 @@
 | `--enumeration-mode`   | `-enum`   | 开关   | 启用枚举模式直接运算(推荐和 -attr 一起使用) | `-enum`                                     |
 | `--debug`              | `-d`      | 开关   | 启用调试模式输出详细日志                    | `-d`                                        |
 | `--min-attr-sum`     | `-mas`    | 多值   | 指定求解后包含的属性词条总和的最小值        | `-mas 智力加持 20 -mas 暴击专注 20`         |
+| `--load-vdata`         | `-lv`     | 开关   | 从 exe 目录读取 `modules.vdata` 离线直接运算 | `-lv`                                       |
 
 #### ⚠️ 使用注意事项
 

@@ -83,6 +83,16 @@ GPU-specific:
 .\StarResonanceAutoMod.exe -a --debug -lang en
 ```
 
+#### 🗂️ Offline Run (No Re-capture Needed)
+
+Once modules are captured, the program automatically saves and overwrites `modules.vdata` in the exe directory (always keeping the latest one).
+
+To compute directly from the latest offline data without recapturing or relogging:
+
+```bash
+.\StarResonanceAutoMod.exe -lv -lang en
+```
+
 ## ⚡ Enumeration Mode Performance Reference
 
 ### 🖥️ Test Environments
@@ -133,6 +143,7 @@ GPU version:
 | `--debug`               | `-d`     | flag    | Enable debug logs                                                    | `-d` |
 | `--min-attr-sum`        | `-mas`   | multi   | Min total value for an attribute in final 4-piece set                | `-mas "Crit Focus" 8 -mas "Intellect Boost" 16` |
 | `--lang`                | `-lang`  | string  | Output language, `zh` or `en` (default: `zh`)                        | `-lang en` |
+| `--load-vdata`          | `-lv`    | flag    | Load `modules.vdata` from exe dir and compute offline                | `-lv` |
 
 #### ⚠️ Notes
 
