@@ -6,10 +6,18 @@ from pybind11.setup_helpers import Pybind11Extension
 import pybind11
 from pathlib import Path
 
+def get_vendored_cccl_include_dirs():
+    cccl_root = Path(__file__).resolve().parent / "third_party" / "cccl"
+    return [
+        cccl_root / "cub",
+        cccl_root / "thrust",
+        cccl_root / "libcudacxx" / "include",
+    ]
+
 # 检测 OpenCL 
 def find_opencl():
     """查找OpenCL"""
-    fixed_cuda = r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8'
+    fixed_cuda = r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9'
     candidates = [{
         'include': os.path.join(fixed_cuda, 'include'),
         'libdir': os.path.join(fixed_cuda, 'lib', 'x64'),
@@ -52,7 +60,7 @@ def find_cuda():
             cuda_paths = [
                 os.environ.get('CUDA_HOME'),
                 os.environ.get('CUDA_PATH'),
-                r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8',
+                r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9',
             ]
             
             cuda_home = None
@@ -103,7 +111,10 @@ def compile_cuda_code(cuda_home):
             # - sm_86: RTX 3000系列
             # - sm_89: RTX 4000系列 (RTX 4060, 4070, 4080等)
             # - sm_120: RTX 5000系列 (RTX 5060, 5070, 5080等)
-            cuda_cmd = f'''"{vs_vars}" && nvcc -c {src_file} -o {obj_file} -std=c++17 --compiler-options "/O2,/std:c++17,/EHsc,/wd4819,/MD" --use_fast_math -I"{cuda_home}\\include" -I"{pybind11.get_include()}" -Isrc -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_89,code=sm_89 -gencode=arch=compute_120,code=sm_120'''
+            cccl_include_flags = " ".join(
+                f'-I"{include_dir}"' for include_dir in get_vendored_cccl_include_dirs() if include_dir.exists()
+            )
+            cuda_cmd = f'''"{vs_vars}" && nvcc -c {src_file} -o {obj_file} -std=c++17 --compiler-options "/O2,/std:c++17,/EHsc,/wd4819,/Zc:preprocessor,/MD" --use_fast_math {cccl_include_flags} -I"{cuda_home}\\include" -I"{pybind11.get_include()}" -lineinfo -Isrc -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_89,code=sm_89 -gencode=arch=compute_120,code=sm_120'''
             
             print(f"🔧 编译 {src_file} ...")
             print(f"📋 编译命令: {cuda_cmd}")
@@ -152,7 +163,7 @@ else:
 # 编译参数
 is_windows = os.name == 'nt'
 if is_windows:
-    extra_compile_args = ["/O2", "/std:c++17", "/utf-8", "/EHsc", "/bigobj", "/MD"]
+    extra_compile_args = ["/O2", "/std:c++17", "/utf-8", "/EHsc", "/bigobj", "/Zc:preprocessor", "/MD", "/arch:AVX2"]
     extra_link_args = ["/NODEFAULTLIB:LIBCMT"]
 else:
     extra_compile_args = ["-O3", "-march=native", "-std=c++17"]
@@ -181,6 +192,7 @@ if use_cuda:
     if compile_cuda_code(cuda_home):
         # 添加CUDA相关配置
         include_dirs.extend([
+            *(str(include_dir) for include_dir in get_vendored_cccl_include_dirs() if include_dir.exists()),
             f"{cuda_home}\\include",
             "src"
         ])

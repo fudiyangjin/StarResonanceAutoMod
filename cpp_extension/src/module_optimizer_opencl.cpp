@@ -738,12 +738,18 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumerationOpenCL(
     const std::unordered_set<int>& exclude_attributes,
     const std::unordered_map<int, int>& min_attr_sum_requirements,
     int max_solutions,
-    int max_workers) {
+    int max_workers,
+    int combination_size) {
 #ifdef USE_OPENCL
+    if (combination_size > 4) {
+        return StrategyEnumeration(modules, target_attributes, exclude_attributes,
+                                   min_attr_sum_requirements, max_solutions, max_workers, combination_size);
+    }
+
     if (!TestOpenCL()) {
         printf("OpenCL not available, using CPU optimized version\n");
         return StrategyEnumeration(modules, target_attributes, exclude_attributes,
-                                   min_attr_sum_requirements, max_solutions, max_workers);
+                                   min_attr_sum_requirements, max_solutions, max_workers, combination_size);
     }
 
     printf("OpenCL GPU acceleration enabled - all calculations performed on GPU\n");
@@ -814,9 +820,9 @@ std::vector<ModuleSolution> ModuleOptimizerCpp::StrategyEnumerationOpenCL(
     }
     return final_solutions;
 #else
-    (void)modules; (void)target_attributes; (void)exclude_attributes; (void)min_attr_sum_requirements; (void)max_solutions; (void)max_workers;
+    (void)modules; (void)target_attributes; (void)exclude_attributes; (void)min_attr_sum_requirements; (void)max_solutions; (void)max_workers; (void)combination_size;
     return StrategyEnumeration(modules, target_attributes, exclude_attributes,
-                               min_attr_sum_requirements, max_solutions, max_workers);
+                               min_attr_sum_requirements, max_solutions, max_workers, combination_size);
 #endif
 }
 

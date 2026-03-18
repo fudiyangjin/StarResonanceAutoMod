@@ -28,9 +28,9 @@ class ModuleParser:
     def _t(self, zh: str, en: str) -> str:
         return en if self.lang == 'en' else zh
     
-    def parse_module_info(self, v_data: CharSerialize, category: str = "全部", attributes: List[str] = None, 
+    def parse_module_info(self, v_data: CharSerialize, category: str = "全部", attributes: List[str] = None,
                          exclude_attributes: List[str] = None, match_count: int = 1, enumeration_mode: bool = False,
-                         min_attr_sum: dict | None = None):
+                         min_attr_sum: dict | None = None, combination_size: int = 4):
         """
         解析模组信息
 
@@ -41,7 +41,7 @@ class ModuleParser:
             exclude_attributes: 要排除的属性词条列表
             match_count: 模组需要包含的指定词条数量
             enumeration_mode: 是否启用枚举模式
-            min_attr_sum: 强制某属性在4件套总和≥VALUE的字典
+            min_attr_sum: 强制某属性在组合中的总和≥VALUE的字典
         """
         self.logger.info(self._t("开始解析模组", "Start parsing modules"))
         
@@ -109,7 +109,15 @@ class ModuleParser:
                 filtered_modules = modules
             
             # 筛选最优模组
-            self._optimize_module_combinations(filtered_modules, category, attributes, exclude_attributes, enumeration_mode, min_attr_sum)
+            self._optimize_module_combinations(
+                filtered_modules,
+                category,
+                attributes,
+                exclude_attributes,
+                enumeration_mode,
+                min_attr_sum,
+                combination_size,
+            )
         
         return modules
     
@@ -156,7 +164,7 @@ class ModuleParser:
         
         return filtered_modules
     
-    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None, exclude_attributes: List[str] = None, enumeration_mode: bool = False, min_attr_sum: Optional[Dict[str, int]] = None):
+    def _optimize_module_combinations(self, modules: List[ModuleInfo], category: str, attributes: List[str] = None, exclude_attributes: List[str] = None, enumeration_mode: bool = False, min_attr_sum: Optional[Dict[str, int]] = None, combination_size: int = 4):
         """筛选模组并展示
         
         Args:
@@ -179,9 +187,15 @@ class ModuleParser:
             
             target_category = category_map.get(category, ModuleCategory.ALL)
             
-            optimizer = ModuleOptimizer(target_attributes=attributes, exclude_attributes=exclude_attributes, min_attr_sum_requirements=min_attr_sum or {}, lang=self.lang)
+            optimizer = ModuleOptimizer(
+                target_attributes=attributes,
+                exclude_attributes=exclude_attributes,
+                min_attr_sum_requirements=min_attr_sum or {},
+                lang=self.lang,
+                combination_size=combination_size,
+            )
             
-            optimizer.optimize_and_display(modules, target_category, top_n=40, enumeration_mode=enumeration_mode)
+            optimizer.optimize_and_display(modules, target_category, top_n=10, enumeration_mode=enumeration_mode)
             
             # 模组筛选完成后自动退出程序
             self.logger.info(self._t("=== 模组筛选完成，准备退出程序 ===", "=== Module filtering finished, exiting ==="))

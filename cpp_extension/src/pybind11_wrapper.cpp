@@ -56,7 +56,8 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
         py::arg("exclude_attributes") = std::unordered_set<int>{},
         py::arg("min_attr_sum_requirements") = std::unordered_map<int,int>{},
         py::arg("max_solutions") = 60,
-        py::arg("max_workers") = 8);
+        py::arg("max_workers") = 8,
+        py::arg("combination_size") = 4);
 
     m.def("strategy_enumeration_cuda_cpp", &ModuleOptimizerCpp::StrategyEnumerationCUDA,
         "CUDA GPU加速枚举",
@@ -65,16 +66,8 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
         py::arg("exclude_attributes") = std::unordered_set<int>{},
         py::arg("min_attr_sum_requirements") = std::unordered_map<int,int>{},
         py::arg("max_solutions") = 60,
-        py::arg("max_workers") = 8);
-
-    m.def("optimize_modules_cpp", &ModuleOptimizerCpp::OptimizeModules,
-        "贪心+局部搜索",
-        py::arg("modules"),
-        py::arg("target_attributes") = std::unordered_set<int>{},
-        py::arg("exclude_attributes") = std::unordered_set<int>{},
-        py::arg("max_solutions") = 60,
-        py::arg("max_attempts_multiplier") = 20,
-        py::arg("local_search_iterations") = 30);
+        py::arg("max_workers") = 8,
+        py::arg("combination_size") = 4);
 
     m.def("strategy_enumeration_opencl_cpp", &ModuleOptimizerCpp::StrategyEnumerationOpenCL,
         "OpenCL GPU加速枚举",
@@ -83,7 +76,8 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
         py::arg("exclude_attributes") = std::unordered_set<int>{},
         py::arg("min_attr_sum_requirements") = std::unordered_map<int,int>{},
         py::arg("max_solutions") = 60,
-        py::arg("max_workers") = 8);
+        py::arg("max_workers") = 8,
+        py::arg("combination_size") = 4);
   
     m.def("strategy_enumeration_gpu_cpp", &ModuleOptimizerCpp::StrategyEnumerationGPU,
         "CUDA优先, 其次OpenCL; 均不可用回退CPU)",
@@ -92,7 +86,20 @@ PYBIND11_MODULE(module_optimizer_cpp, m) {
         py::arg("exclude_attributes") = std::unordered_set<int>{},
         py::arg("min_attr_sum_requirements") = std::unordered_map<int,int>{},
         py::arg("max_solutions") = 60,
-        py::arg("max_workers") = 8);
+        py::arg("max_workers") = 8,
+        py::arg("combination_size") = 4);
+
+    m.def("strategy_beam_search_cpp", &ModuleOptimizerCpp::StrategyBeamSearch,
+        "Beam Search 近似求解",
+        py::arg("modules"),
+        py::arg("target_attributes") = std::unordered_set<int>{},
+        py::arg("exclude_attributes") = std::unordered_set<int>{},
+        py::arg("min_attr_sum_requirements") = std::unordered_map<int,int>{},
+        py::arg("max_solutions") = 60,
+        py::arg("beam_width") = 128,
+        py::arg("expand_per_state") = 0,
+        py::arg("combination_size") = 4,
+        py::arg("max_workers") = 3);
 
     // N卡加速是否可用
 #ifdef USE_CUDA

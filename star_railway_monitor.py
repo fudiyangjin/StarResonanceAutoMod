@@ -42,9 +42,9 @@ def get_exec_base_dir() -> str:
 class StarResonanceMonitor:
     """星痕共鸣监控器"""
     
-    def __init__(self, interface_index: int = None, category: str = "全部", attributes: List[str] = None, 
+    def __init__(self, interface_index: int = None, category: str = "全部", attributes: List[str] = None,
                  exclude_attributes: List[str] = None, match_count: int = 1, enumeration_mode: bool = False,
-                 min_attr_sum: dict | None = None, lang: str = 'zh'):
+                 min_attr_sum: dict | None = None, combination_size: int = 4, lang: str = 'zh'):
         """
         初始化监控器
         
@@ -55,7 +55,7 @@ class StarResonanceMonitor:
             exclude_attributes: 要排除的属性词条列表
             match_count: 模组需要包含的指定词条数量
             enumeration_mode: 是否启用枚举模式
-            min_attr_sum: 强制某属性在4件套总和≥VALUE的字典
+            min_attr_sum: 强制某属性在组合中的总和≥VALUE的字典
         """
         self.interface_index = interface_index
         self.category = category
@@ -64,6 +64,7 @@ class StarResonanceMonitor:
         self.match_count = match_count
         self.min_attr_sum = min_attr_sum or {}
         self.enumeration_mode = enumeration_mode
+        self.combination_size = combination_size
         self.lang = (lang or 'zh').lower()
         self.is_running = False
         
@@ -154,7 +155,8 @@ class StarResonanceMonitor:
                     exclude_attributes=self.exclude_attributes,
                     match_count=self.match_count,
                     enumeration_mode=self.enumeration_mode,
-                    min_attr_sum=self.min_attr_sum
+                    min_attr_sum=self.min_attr_sum,
+                    combination_size=self.combination_size
                 )
                     
         except Exception as e:
@@ -178,8 +180,10 @@ def main():
                        help='指定要排除的属性词条 (例如: 特攻治疗加持 专精治疗加持)')
     parser.add_argument('--match-count', '-mc', type=int, default=1,
                        help='模组需要包含的指定词条数量 (默认: 1)')
+    parser.add_argument('--combination-size', '-cs', type=int, default=4, choices=[4, 5],
+                       help='组合模组数量，可选 4 或 5 (默认: 4)')
     parser.add_argument('--min-attr-sum', '-mas', nargs=2, action='append', metavar=('ATTR','VALUE'),
-                       help='强制某属性在4件套总和≥VALUE。可多次使用，如：-mas 暴击专注 8 -mas 智力加持 12')
+                       help='强制某属性在组合总和≥VALUE。可多次使用，如：-mas 暴击专注 8 -mas 智力加持 12')
     parser.add_argument('--enumeration-mode', '-enum', action='store_true',
                        help='启用枚举模式, 直接使用枚举运算')
     parser.add_argument('--lang', '-lang', type=str, default='zh', help='输出语言: zh 或 en (默认: zh)')
@@ -233,7 +237,8 @@ def main():
                 exclude_attributes=exclude_attributes_cn,
                 match_count=args.match_count,
                 enumeration_mode=args.enumeration_mode,
-                min_attr_sum=min_attr_sum
+                min_attr_sum=min_attr_sum,
+                combination_size=args.combination_size
             )
         except SystemExit:
             raise
@@ -286,7 +291,7 @@ def main():
     else:
         # 交互式选择
         print(_tr(lang, "星痕共鸣模组筛选器!", "Star Resonance Module Filter!"))
-        print(_tr(lang, "版本: V1.6.5", "Version: V1.6.5"))
+        print(_tr(lang, "版本: V1.7", "Version: V1.7"))
         print("GitHub: https://github.com/fudiyangjin/StarResonanceAutoMod")
         print()
         
@@ -304,6 +309,7 @@ def main():
         match_count=args.match_count,
         enumeration_mode=args.enumeration_mode,
         min_attr_sum=min_attr_sum,
+        combination_size=args.combination_size,
         lang=lang
     )
     

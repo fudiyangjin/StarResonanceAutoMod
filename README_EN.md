@@ -36,7 +36,7 @@ GPU-specific:
 
 #### 🔽 Get the Tool
 
-1. Download from the Release page:
+1. Download from the [Release page](https://github.com/fudiyangjin/StarResonanceAutoMod/releases):
    - `StarResonanceAutoMod_CPU.exe` – CPU version
    - `StarResonanceAutoMod_CUDA.exe` – GPU version
 2. Place the file in any directory
@@ -76,6 +76,15 @@ GPU-specific:
 # Enumeration + target attributes (recommended)
 .\StarResonanceAutoMod.exe -a -enum -attr "Intellect Boost" "Crit Focus" "Special Attack" -lang en
 
+# Enable 5-module computation
+.\StarResonanceAutoMod.exe -a -cs 5 -lang en
+
+# Enable 5-module with preferred attributes
+.\StarResonanceAutoMod.exe -a -cs 5 -attr "Intellect Boost" "Crit Focus" "Special Attack" -lang en
+
+# Enable 5-module with final combination filter
+.\StarResonanceAutoMod.exe -a -cs 5 -mas "Special Attack" 20 -mas "Intellect Boost" 16 -lang en
+
 # Enforce final attribute sums with enumeration
 .\StarResonanceAutoMod.exe -a -enum -attr "Intellect Boost" "Crit Focus" "Special Attack" -mas "Special Attack" 20 -mas "Intellect Boost" 16 -lang en
 
@@ -90,7 +99,13 @@ Once modules are captured, the program automatically saves and overwrites `modul
 To compute directly from the latest offline data without recapturing or relogging:
 
 ```bash
-.\StarResonanceAutoMod.exe -lv -lang en
+.\StarResonanceAutoMod.exe -enum -lv -lang en
+```
+
+For 5-module offline computation:
+
+```bash
+.\StarResonanceAutoMod.exe -lv -cs 5 -lang en
 ```
 
 ## ⚡ Enumeration Mode Performance Reference
@@ -113,18 +128,35 @@ GPU version:
 
 | Modules | Combinations     | CPU Time  | CPU/s      | CUDA Time | CUDA/s     | CUDA Gain | OpenCL Time | OpenCL/s   | OpenCL Gain |
 | ------- | ---------------- | --------- | ---------- | --------- | ---------- | --------- | ----------- | ---------- | ----------- |
-| 500     | 2,573,031,125    | 13.630s   | ~188.7M    | 1.2837s   | ~2004.0M   | 10.62x    | 3.6628s     | ~702.5M    | 3.72x       |
-| 600     | 5,346,164,850    | 27.348s   | ~195.5M    | 2.6983s   | ~1981.9M   | 10.14x    | 7.3117s     | ~731.5M    | 3.74x       |
-| 700     | 9,918,641,075    | 50.245s   | ~197.4M    | 5.0685s   | ~1957.9M   | 9.91x     | 13.0472s    | ~760.3M    | 3.85x       |
-| 800     | 16,938,959,800   | 87.154s   | ~194.3M    | 8.1274s   | ~2084.8M   | 10.72x    | 22.3830s    | ~757.0M    | 3.90x       |
-| 900     | 27,155,621,025   | -         | -          | 14.1992s  | ~1912.5M   | 9.84x     | 37.3179s    | ~727.9M    | 3.75x       |
-| 1000    | 41,417,124,375   | -         | -          | 23.2125s  | ~1784.5M   | 9.18x     | 57.2074s    | ~723.9M    | 3.73x       |
+| 500     | 2,573,031,125    | 6.8124s   | ~377.7M    | 0.2756s   | ~9336.1M   | 24.72x    | 3.6628s     | ~702.5M    | 3.72x       |
+| 600     | 5,346,164,850    | 14.3606s  | ~372.3M    | 0.5258s   | ~10167.7M  | 27.31x    | 7.3117s     | ~731.5M    | 3.74x       |
+| 700     | 9,918,641,075    | 26.4913s  | ~374.4M    | 1.0677s   | ~9289.7M   | 24.81x    | 13.0472s    | ~760.3M    | 3.85x       |
+| 800     | 16,938,959,800   | 43.7750s  | ~387.0M    | 1.4090s   | ~12022.0M  | 31.07x    | 22.3830s    | ~757.0M    | 3.90x       |
+| 900     | 27,155,621,025   | -         | -          | 2.5902s   | ~10484.0M  | -         | 37.3179s    | ~727.9M    | 3.75x       |
+| 1000    | 41,417,124,375   | -         | -          | 3.6148s   | ~11457.7M  | -         | 57.2074s    | ~723.9M    | 3.73x       |
+
+> **Note:**
+>
+> - CPU and CUDA test results have been updated
+> - OpenCL column retained as historical data; not re-tested in this round
+> - 900/1000 modules: only CUDA main path (Dense LUT) data added; CPU and gain factor left blank
 
 ### 🚀 Performance Tips
 
 1. Close the game during enumeration to free CPU/GPU resources
 2. Avoid other heavy workloads when running the optimizer
 3. Choose a reasonable number of modules to avoid excessive computation
+
+### 🧩 5-Module CUDA Test Results
+
+5-module mode is enabled via `--combination-size 5` or `-cs 5`. When CUDA is available, the program uses **parallel strategy enumeration + beam search**; `-enum` is automatically disabled and falls back to regular optimization in 5-module mode.
+
+| Modules | Combinations      | CUDA Time  |
+| ------- | ----------------- | ---------- |
+| 500     | 255,244,687,600   | 24.3293s   |
+| 600     | 637,262,850,120   | 59.6303s   |
+
+> **Note:** 5-module combination space is much larger than 4-module.
 
 > ⚠️ Enumeration Limit: Up to 800 modules in CPU/OpenCL mode and 1000 in CUDA; if exceeded, prefiltering will reduce to the limit automatically.
 
@@ -139,7 +171,8 @@ GPU version:
 | `--attributes`          | `-attr`  | multi   | Include attributes (prioritized)                                     | `-attr "Intellect Boost" "Crit Focus"` |
 | `--exclude-attributes`  | `-exattr`| multi   | Exclude attributes (lower priority)                                  | `-exattr "Cast Focus"` |
 | `--match-count`         | `-mc`    | int     | Number of required target attributes                                 | `-mc 2` (default: 1) |
-| `--enumeration-mode`    | `-enum`  | flag    | Enable enumeration mode (recommended with -attr)                     | `-enum` |
+| `--combination-size`    | `-cs`    | int     | Number of modules per combination, `4` or `5`                        | `-cs 5` |
+| `--enumeration-mode`    | `-enum`  | flag    | Enable enumeration mode (recommended with -attr, 4-module only)      | `-enum` |
 | `--debug`               | `-d`     | flag    | Enable debug logs                                                    | `-d` |
 | `--min-attr-sum`        | `-mas`   | multi   | Min total value for an attribute in final 4-piece set                | `-mas "Crit Focus" 8 -mas "Intellect Boost" 16` |
 | `--lang`                | `-lang`  | string  | Output language, `zh` or `en` (default: `zh`)                        | `-lang en` |
@@ -150,8 +183,10 @@ GPU version:
 1. Install Npcap first; otherwise packet capture will not work
 2. Prefer `-a` to auto-select the network interface
 3. For best CPU utilization during enumeration, exit the game while computing
-4. Enumeration mode supports up to 800 (CPU/OpenCL) or 1000 (CUDA) modules
-5. `-attr`, `-exattr`, `-mas` require supported attribute names (see below)
+4. Enumeration mode supports up to 800 (CPU/OpenCL) or 1000 (CUDA) modules; if exceeded, auto-prefilter to the limit
+5. **5-module mode**: Use `-cs 5` for 5-module computation; with CUDA, enables parallel strategy enumeration + beam search; without CUDA, beam search only
+6. **5-module and enumeration**: In 5-module mode, `-enum` is automatically disabled and falls back to regular optimization
+7. `-attr`, `-exattr`, `-mas` require supported attribute names (see below)
 
 ---
 
@@ -202,6 +237,7 @@ pip install -r requirements.txt
 > - `zstandard>=0.21.0`: compression
 > - `protobuf>=4.21.0`: protocol buffers
 > - `pybind11>=2.10.0`: C++ binding
+> - `cpp_extension/third_party/cccl-3.3.0/`: cccl >= 3.3
 
 3) Build C++ extensions
 
@@ -226,7 +262,8 @@ cd ..
 > - The build script auto-detects CUDA
 > - If CUDA is detected, the GPU-accelerated version is built
 > - If CUDA build fails, it falls back to CPU
-> - Supported GPU families: RTX 2000/3000/4000/5000 series
+> - `cpp_extension/third_party/` contains additional header dependencies for compilation
+> - Supported GPU families: GTX 1000, RTX 2000/3000/4000/5000 series
 
 #### 🚀 Run
 
@@ -276,6 +313,7 @@ StarResonanceAutoMod/
 ├── requirements.txt           # Python dependencies
 ├── cpp_extension/             # C++ performance extensions
 │   ├── setup.py               # Build script
+│   ├── third_party/           # CUDA build dependencies (including CCCL headers)
 │   └── src/                   # C++ sources
 │       ├── module_optimizer.cpp       # CPU optimizer
 │       ├── module_optimizer_cuda.cu   # CUDA GPU optimizer

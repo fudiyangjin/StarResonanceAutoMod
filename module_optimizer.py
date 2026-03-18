@@ -6,7 +6,7 @@ import logging
 import os
 import random
 import multiprocessing as mp
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from itertools import combinations
 from logging_config import get_logger
@@ -21,12 +21,9 @@ from cpp_extension.module_optimizer_cpp import (
     ModulePart as CppModulePart,
     ModuleInfo as CppModuleInfo,
     ModuleSolution as CppModuleSolution,
-    strategy_enumeration_cpp,
-    strategy_enumeration_cuda_cpp,
     strategy_enumeration_gpu_cpp,
-    strategy_enumeration_opencl_cpp,
+    strategy_beam_search_cpp,
     test_cuda,
-    optimize_modules_cpp
 )
 
 # 多进程保护, 延迟初始化日志器
@@ -57,7 +54,14 @@ class ModuleSolution:
 class ModuleOptimizer:
     """模组搭配优化器"""
     
-    def __init__(self, target_attributes: List[str] = None, exclude_attributes: List[str] = None, min_attr_sum_requirements: dict | None = None, lang: str = 'zh'):
+    def __init__(
+        self,
+        target_attributes: List[str] = None,
+        exclude_attributes: List[str] = None,
+        min_attr_sum_requirements: dict | None = None,
+        lang: str = 'zh',
+        combination_size: int = 4,
+    ):
         """初始化模组搭配优化器
         
         Args:
@@ -70,12 +74,16 @@ class ModuleOptimizer:
         self.exclude_attributes = exclude_attributes or []
         self.min_attr_sum_requirements = min_attr_sum_requirements or {}
         self.lang = (lang or 'zh').lower()
+        self.combination_size = int(combination_size)
+        if self.combination_size not in (4, 5):
+            raise ValueError("combination_size only supports 4 or 5")
         
-        self.local_search_iterations = 50  # 局部搜索迭代次数
-        self.max_attempts = 20             # 贪心+局部搜索最大尝试次数
+        self.beam_width = 5096              # Beam Search 每层保留宽度
+        self.beam_expand_per_state = 0     # 0 表示不限制单状态扩展数
+        self.beam_max_workers = 3          # Beam Search 多起点并行线程数
         self.max_solutions = 100           # 最大解数量
         self.max_workers = 8               # 最大线程数
-        self.enumeration_num = 400         # 并行策略中最大枚举模组数
+        self.enumeration_num = 500         # 并行策略中最大枚举模组数
     
     def _t(self, zh: str, en: str) -> str:
         return en if self.lang == 'en' else zh
@@ -247,33 +255,56 @@ class ModuleOptimizer:
             ]
             self.logger.info(self._t(f"找到{len(filtered_modules)}个{category.value}类型模组", f"Found {len(filtered_modules)} {cat_disp} modules"))
         
-        if len(filtered_modules) < 4:
-            self.logger.warning(self._t(f"{category.value}类型模组数量不足4个, 无法形成完整搭配", f"Not enough {cat_disp} modules (<4) to form a combination"))
+        if len(filtered_modules) < self.combination_size:
+            self.logger.warning(self._t(
+                f"{category.value}类型模组数量不足{self.combination_size}个, 无法形成完整搭配",
+                f"Not enough {cat_disp} modules (<{self.combination_size}) to form a combination"))
             return []
         
         # 筛选模组
         top_modules, candidate_modules = self._prefilter_modules(filtered_modules)
-        greedy_solutions = []
-        
-        if len(candidate_modules) > self.enumeration_num:
+        beam_solutions = []
+        enum_solutions = []
+
+        if self.combination_size == 5:
+            if self.check_cuda_availability():
+                self.logger.info(self._t(
+                    "5模组且CUDA可用，启用并行策略枚举+beam search",
+                    "5-module mode with CUDA available, enabling parallel enumeration + beam search"))
+                num_processes = min(2, mp.cpu_count())
+
+                # 创建进程池, spawn兼容打包环境
+                ctx = mp.get_context('spawn')
+                with ctx.Pool(processes=num_processes) as pool:
+                    beam_future = pool.apply_async(self._strategy_beam_search, (candidate_modules,))
+                    enum_future = pool.apply_async(self._strategy_enumeration, (top_modules,))
+
+                    beam_solutions = beam_future.get()
+                    enum_solutions = enum_future.get()
+            else:
+                self.logger.info(self._t(
+                    "5模组且CUDA不可用，仅执行beam search",
+                    "5-module mode without CUDA, running beam search only"))
+                beam_solutions = self._strategy_beam_search(candidate_modules)
+        elif len(candidate_modules) > self.enumeration_num:
             self.logger.info(self._t("并行策略开始", "Parallel strategies start"))
             num_processes = min(2, mp.cpu_count())
 
             # 创建进程池, spawn兼容打包环境
             ctx = mp.get_context('spawn')
             with ctx.Pool(processes=num_processes) as pool:
-                # 贪心策略
-                greedy_future = pool.apply_async(self._strategy_greedy_local_search, (candidate_modules,))
+                # Beam Search 近似策略
+                beam_future = pool.apply_async(self._strategy_beam_search, (candidate_modules,))
                 # 枚举策略
                 enum_future = pool.apply_async(self._strategy_enumeration, (top_modules,))
                 
-                greedy_solutions = greedy_future.get()
+                beam_solutions = beam_future.get()
                 enum_solutions = enum_future.get()
         else:
             # 枚举开始
             enum_solutions = self._strategy_enumeration(top_modules)
 
-        all_solution = greedy_solutions + enum_solutions
+        all_solution = beam_solutions + enum_solutions
         unique_solutions = self._complete_deduplicate(all_solution)
         unique_solutions = self._filter_by_min_attr(unique_solutions)
         unique_solutions.sort(key=lambda x: x.score, reverse=True)
@@ -331,19 +362,27 @@ class ModuleOptimizer:
             ]
             self.logger.info(self._t(f"找到{len(filtered_modules)}个{category.value}类型模组", f"Found {len(filtered_modules)} {cat_disp} modules"))
         
-        if len(filtered_modules) < 4:
-            self.logger.warning(self._t(f"{category.value}类型模组数量不足4个, 无法形成完整搭配", f"Not enough {cat_disp} modules (<4) to form a combination"))
+        if len(filtered_modules) < self.combination_size:
+            self.logger.warning(self._t(
+                f"{category.value}类型模组数量不足{self.combination_size}个, 无法形成完整搭配",
+                f"Not enough {cat_disp} modules (<{self.combination_size}) to form a combination"))
             return []
         
-        # 超过800/1000个根据总属性筛下
+        cuda_limit = 1000
+        cpu_limit = 800
+
         if self.check_cuda_availability():
-            if len(filtered_modules) > 1000:
-                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 1000)
-                self.logger.info(self._t(f"枚举数量超过1000, 进行筛选, 筛选后模组数量: {len(filtered_modules)}", f"Enumeration exceeds 1000, prefilter applied: {len(filtered_modules)} remain"))
+            if len(filtered_modules) > cuda_limit:
+                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, cuda_limit)
+                self.logger.info(self._t(
+                    f"枚举数量超过{cuda_limit}, 进行筛选, 筛选后模组数量: {len(filtered_modules)}",
+                    f"Enumeration exceeds {cuda_limit}, prefilter applied: {len(filtered_modules)} remain"))
         else:
-            if len(filtered_modules) > 800:
-                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, 800)
-                self.logger.info(self._t(f"枚举数量超过800, 进行筛选, 筛选后模组数量: {len(filtered_modules)}", f"Enumeration exceeds 800, prefilter applied: {len(filtered_modules)} remain"))
+            if len(filtered_modules) > cpu_limit:
+                filtered_modules = self._prefilter_modules_by_total_scores(filtered_modules, cpu_limit)
+                self.logger.info(self._t(
+                    f"枚举数量超过{cpu_limit}, 进行筛选, 筛选后模组数量: {len(filtered_modules)}",
+                    f"Enumeration exceeds {cpu_limit}, prefilter applied: {len(filtered_modules)} remain"))
         
         enum_solutions = self._strategy_enumeration(filtered_modules)
         unique_solutions = self._complete_deduplicate(enum_solutions)
@@ -401,15 +440,16 @@ class ModuleOptimizer:
             exclude_attrs_set,
             min_attr_id_requirements,    
             self.max_solutions,
-            self.get_cpu_count()
+            self.get_cpu_count(),
+            self.combination_size,
         )
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
 
         return result
     
-    def _strategy_greedy_local_search(self, modules: List[ModuleInfo]) -> List[ModuleSolution]:
-        """贪心+局部搜索
+    def _strategy_beam_search(self, modules: List[ModuleInfo]) -> List[ModuleSolution]:
+        """Beam Search 近似求解
         
         Args:
             modules: 所有模组列表
@@ -419,17 +459,14 @@ class ModuleOptimizer:
         """
         
         cpp_modules = self._convert_to_cpp_modules(modules)
-        
-        boost_attr_names: Set[str] = set(self.target_attributes or [])
-        if self.min_attr_sum_requirements:
-            boost_attr_names.update(self.min_attr_sum_requirements.keys())
 
-        # 将 boost 后的目标属性名 -> id
+        # 将目标属性列表转换为集合
         target_attributes_id: List[int] = []
-        for attr_str in boost_attr_names:
-            aid = MODULE_ATTR_IDS.get(attr_str)
-            if aid is not None:
-                target_attributes_id.append(aid)
+        if self.target_attributes:
+            for attr_str in self.target_attributes:
+                aid = MODULE_ATTR_IDS.get(attr_str)
+                if aid is not None:
+                    target_attributes_id.append(aid)
         target_attrs_set = set(target_attributes_id)
         
         # 将排除属性列表转换为集合
@@ -441,8 +478,23 @@ class ModuleOptimizer:
                     exclude_attributes_id.append(aid)
         exclude_attrs_set = set(exclude_attributes_id)
         
-        cpp_solutions = optimize_modules_cpp(
-            cpp_modules, target_attrs_set, exclude_attrs_set, self.max_solutions, self.max_attempts, self.local_search_iterations)
+        min_attr_id_requirements: Dict[int, int] = {}
+        if self.min_attr_sum_requirements:
+            for name, val in self.min_attr_sum_requirements.items():
+                aid = MODULE_ATTR_IDS.get(name)
+                if aid is not None:
+                    min_attr_id_requirements[aid] = int(val)
+
+        cpp_solutions = strategy_beam_search_cpp(
+            cpp_modules,
+            target_attrs_set,
+            exclude_attrs_set,
+            min_attr_id_requirements,
+            self.max_solutions,
+            self.beam_width,
+            self.beam_expand_per_state,
+            self.combination_size,
+            min(self.beam_max_workers, self.get_cpu_count()))
         
         result = self._convert_from_cpp_solutions(cpp_solutions)
         
@@ -658,9 +710,13 @@ class ModuleOptimizer:
         print(f"{'='*50}")
         self._log_result(f"{'='*50}")
         
-        if enumeration_mode:
-            optimal_solutions = self.enumerate_modules(modules, category, self.max_solutions)
+        if enumeration_mode and self.combination_size < 5:
+            optimal_solutions = self.enumerate_modules(modules, category, top_n)
         else:
+            if enumeration_mode and self.combination_size >= 5:
+                self.logger.warning(self._t(
+                    "5模组下已禁用枚举模式，自动切换为常规优化模式",
+                    "Enumeration mode is disabled for 5-module combinations, fallback to normal optimization"))
             optimal_solutions = self.optimize_modules(modules, category, top_n)
         
         if not optimal_solutions:
